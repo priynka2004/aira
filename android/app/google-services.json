@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "818515844415",
+    "project_id": "aira-for-artist",
+    "storage_bucket": "aira-for-artist.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:818515844415:android:efabe7a640b0c0ca34078a",
+        "android_client_info": {
+          "package_name": "com.aira.sunndari"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCtJ4njgAnfDCDUDg0nTn2R4aK51y79ncg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
