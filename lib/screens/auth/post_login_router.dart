@@ -69,7 +69,7 @@ Future<void> routeAfterLogin(BuildContext context) async {
     Navigator.pushAndRemoveUntil(
       context,
       MaterialPageRoute(builder: (_) => screen),
-      (_) => false,
+          (_) => false,
     );
   } catch (e) {
     debugPrint(e.toString());

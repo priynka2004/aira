@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sunndari Artist</title>
+  <meta property="og:title" content="Book this artist on Sunndari">
+  <meta property="og:description" content="Tap to open the artist profile in the Sunndari app.">
+  <style>
+    body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+           font-family: system-ui, sans-serif; background:#fdeef2; color:#5a1030; text-align:center; }
+    .box { padding:32px 20px; max-width:360px; }
+    a.btn { display:inline-block; margin-top:18px; padding:14px 28px; border-radius:30px;
+            background:linear-gradient(90deg,#c2185b,#8e1240); color:#fff; text-decoration:none; font-weight:700; }
+    p.small { font-size:13px; opacity:.75; margin-top:18px; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <h2>Opening Sunndari…</h2>
+    <a id="open" class="btn" href="#">Open Profile In App</a>
+    <p class="small">If the app does not open, tap the button above.<br>
+      Inside WhatsApp: ⋮ menu → "Open in browser", then tap the button.</p>
+  </div>
+  <script>
+    var id = new URLSearchParams(location.search).get('id') || '';
+    var pkg = 'com.aira.sunndari';
+    var path = 'app/profile' + (id ? '?id=' + encodeURIComponent(id) : '');
+    var isAndroid = /android/i.test(navigator.userAgent);
+    var url = isAndroid
+      ? 'intent://' + path + '#Intent;scheme=sunndari;package=' + pkg + ';end'
+      : 'sunndari://' + path;
+    document.getElementById('open').href = url;
+    window.location.href = url;
+  </script>
+</body>
+</html>

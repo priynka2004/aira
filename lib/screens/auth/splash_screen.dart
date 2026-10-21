@@ -3,6 +3,7 @@
 // Loads saved session -> if logged in goes to resolvePostAuthScreen(), else LoginScreen.
 
 import 'package:flutter/material.dart';
+import '../../services/deep_link_service.dart';
 import '../../utils/app_feedback.dart';
 import '../../theme/tokens.dart';
 import '../../utils/app_session.dart';
@@ -55,6 +56,7 @@ class _SplashScreenState extends State<SplashScreen> {
       final screen = await resolvePostAuthScreen();
       if (!mounted) return;
       _goTo(screen);
+      DeepLinkService.instance.markReady();
     } catch (e) {
       debugPrint('Splash Error = $e');
       if (!mounted) return;

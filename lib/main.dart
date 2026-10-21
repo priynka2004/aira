@@ -9,6 +9,7 @@ import 'firebase_options.dart';
 import 'api/api_service.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/auth/splash_screen.dart';
+import 'services/deep_link_service.dart';
 import 'services/push_notification_service.dart';
 import 'theme/tokens.dart';
 import 'utils/nav_key.dart';
@@ -30,11 +31,14 @@ void main() async {
     if (nav == null) return;
     nav.pushAndRemoveUntil(
       MaterialPageRoute(builder: (_) => const LoginScreen()),
-      (route) => false,
+          (route) => false,
     );
   };
 
   await PushNotificationService.instance.initLocalNotifications();
+
+  // Shared profile link (sunndari://app/profile) -> opens Public Profile Preview.
+  await DeepLinkService.instance.init();
 
   runApp(const AiraApp());
 }
