@@ -1,5 +1,7 @@
-/// Matches the backend's `Booking` schema
-/// (GET /artists/bookings/get/, get_all/, PUT update_status/).
+// FILE: models/booking/booking.dart  |  MODEL
+// Booking returned by the backend (+ BookingStatusEnum).
+
+/// Model: Booking.
 class Booking {
   final int bookingId;
   final int customerId;
@@ -8,15 +10,10 @@ class Booking {
   final int packageId;
   final int locationTypeId;
   final int? addressId;
-  final String bookingDate; // yyyy-MM-dd
+  final String bookingDate;
   final String startTime;
   final String? endTime;
   final int statusId;
-  // Nullable/best-effort: the backend does not yet return this on
-  // Booking (only `/core/payment-status/get_all/` exists as a lookup
-  // table today — see the Booking Screen backend requirements doc).
-  // Parsed defensively so the app picks it up automatically the day
-  // the backend adds it, without another app release.
   final int? paymentStatusId;
   final double totalAmount;
   final String? notes;
@@ -25,17 +22,17 @@ class Booking {
   final String? expiresAt;
   final String? createdAt;
   final String? updatedAt;
-
-  // ── Booking-lifecycle sub-stage timestamps ──────────────────────────
-  // While statusId still resolves to "confirmed", these are what tell
-  // Upcoming / On My Way / Arrived apart (see the Booking Lifecycle Field
-  // Guide's "Deriving the sub-stage client-side" callout): check
-  // arrivedAt first, then onMyWayAt. Both null → Upcoming. onMyWayAt set
-  // → On My Way. arrivedAt set → Arrived.
   final String? onMyWayAt;
   final String? arrivedAt;
   final String? serviceStartedAt;
   final String? serviceCompletedAt;
+  // Added by the API (artist sees commission + net; null on older bookings)
+  final double? platformFee;
+  final double? netAmount;
+  final double travelFee;
+  final int travelTimeMinutes;
+  final int returnBufferMinutes;
+  final List<BookingAddOn> addons;
 
   Booking({
     required this.bookingId,
@@ -61,10 +58,15 @@ class Booking {
     this.arrivedAt,
     this.serviceStartedAt,
     this.serviceCompletedAt,
+    this.platformFee,
+    this.netAmount,
+    this.travelFee = 0,
+    this.travelTimeMinutes = 0,
+    this.returnBufferMinutes = 0,
+    this.addons = const [],
   });
 
-  /// Parses [bookingDate] + [startTime] into a local `DateTime`, mirroring
-  /// [BookingSlot.startDateTime]. Null if either piece is missing/unparseable.
+  /// Starts date time.
   DateTime? get startDateTime {
     if (bookingDate.isEmpty || startTime.isEmpty) return null;
     try {
@@ -79,20 +81,14 @@ class Booking {
     }
   }
 
-  /// True once this booking's scheduled start time — plus the same 2-hour
-  /// grace window the Customer app uses (see
-  /// `BookingStatusUtil.derive` in the Customer app's `booking_status.dart`)
-  /// — has actually arrived (or passed). Used to decide the on-my-way
-  /// deadline: [JourneyStage] treats "still upcoming, grace window over,
-  /// never marked on the way" as [JourneyStage.missed]. Kept in sync with
-  /// the Customer app's 2h grace so both apps agree on when a booking
-  /// flips to "Missed" for the same booking at the same wall-clock time.
+  /// Returns true if it has start time passed.
   bool get hasStartTimePassed {
     final start = startDateTime;
     if (start == null) return false;
     return !DateTime.now().isBefore(start.add(const Duration(hours: 2)));
   }
 
+  /// Builds this object from API JSON.
   factory Booking.fromJson(Map<String, dynamic> json) {
     double parseAmount(dynamic v) {
       if (v == null) return 0;
@@ -107,13 +103,6 @@ class Booking {
       return int.tryParse(v.toString()) ?? 0;
     }
 
-    // Second line of defense: whatever gets handed in here becomes a
-    // plain string (or null), regardless of caller. REST always sends
-    // strings already; this only matters for callers like
-    // FirestoreBookingService that may hand through a raw Firestore
-    // Timestamp — that call site already normalizes these, but a field
-    // should never be able to crash parsing just because some other
-    // future caller forgot to.
     String? asString(dynamic v) => v?.toString();
 
     return Booking(
@@ -135,7 +124,7 @@ class Booking {
       notes: asString(json['notes']),
       cancelledBy: asString(json['cancelledBy'] ?? json['cancelled_by']),
       cancellationReason:
-          asString(json['cancellationReason'] ?? json['cancellation_reason']),
+      asString(json['cancellationReason'] ?? json['cancellation_reason']),
       expiresAt: asString(json['expiresAt'] ?? json['expires_at']),
       createdAt: asString(json['createdAt'] ?? json['created_at']),
       updatedAt: asString(json['updatedAt'] ?? json['updated_at']),
@@ -143,11 +132,20 @@ class Booking {
       arrivedAt: asString(json['arrivedAt'] ?? json['arrived_at']),
       serviceStartedAt: asString(json['serviceStartedAt'] ?? json['service_started_at']),
       serviceCompletedAt: asString(json['serviceCompletedAt'] ?? json['service_completed_at']),
+      platformFee: json['platformFee'] == null ? null : parseAmount(json['platformFee']),
+      netAmount: json['netAmount'] == null ? null : parseAmount(json['netAmount']),
+      travelFee: parseAmount(json['travelFee']),
+      travelTimeMinutes: parseInt(json['travelMinutesBefore'] ?? json['travelTimeMinutes']),
+      returnBufferMinutes: parseInt(json['returnBufferMinutes']),
+      addons: ((json['addOns'] ?? json['addons'] as List?) as List? ?? const [])
+          .whereType<Map>()
+          .map((e) => BookingAddOn.fromJson(Map<String, dynamic>.from(e)))
+          .toList(),
     );
   }
 }
 
-/// The backend's booking-status enum used by /artists/bookings/update_status/.
+/// Enum: Booking Status Enum values.
 enum BookingStatusEnum {
   confirmed,
   inProgress,
@@ -169,4 +167,21 @@ enum BookingStatusEnum {
         return 'no_show';
     }
   }
+}
+
+/// Add-on chosen on a booking (snapshot: later edits to the add-on do not change it).
+class BookingAddOn {
+  final int addOnId;
+  final String name;
+  final double price;
+  final int durationMinutes;
+
+  const BookingAddOn({required this.addOnId, required this.name, required this.price, this.durationMinutes = 0});
+
+  factory BookingAddOn.fromJson(Map<String, dynamic> j) => BookingAddOn(
+    addOnId: (j['addOnId'] as num?)?.toInt() ?? 0,
+    name: (j['name'] ?? '').toString(),
+    price: double.tryParse('${j['price']}') ?? 0,
+    durationMinutes: (j['durationMinutes'] as num?)?.toInt() ?? 0,
+  );
 }

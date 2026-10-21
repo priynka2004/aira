@@ -1,12 +1,11 @@
-/// Matches the backend's Help Center conversation schema
-/// (`GET /help_center/conversation/get/`).
+// FILE: models/help_center/help_conversation.dart  |  MODEL
+// Help Center conversation.
+
+/// Model: Help Conversation.
 class HelpConversation {
   final int conversationId;
   final int customerId;
 
-  /// `open` (sent, no reply yet), `running` (admin has replied), or
-  /// `closed` (terminal — cannot be reopened; sending again starts a new
-  /// conversation).
   final String status;
   final String createdAt;
   final String? closedAt;
@@ -19,8 +18,10 @@ class HelpConversation {
     this.closedAt,
   });
 
+  /// Returns true if closed.
   bool get isClosed => status == 'closed';
 
+  /// Builds this object from API JSON.
   factory HelpConversation.fromJson(Map<String, dynamic> json) {
     int parseInt(dynamic v) {
       if (v == null) return 0;

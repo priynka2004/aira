@@ -1,56 +1,58 @@
+// FILE: api/chat_socket.dart
+// WebSocket client for real-time booking chat + the event types it emits.
+
 import 'dart:async';
 import 'dart:convert';
-import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import '../models/chat/chat_message.dart';
+import '../utils/api_logger.dart';
 import 'api_endpoints.dart';
 
-/// Events the server can push down the chat WebSocket. See the API docs:
-/// `message.created`, `conversation.closed`, `message.rejected`, `error`.
+/// Chat Socket Event.
 sealed class ChatSocketEvent {
   const ChatSocketEvent();
 }
 
+/// Chat Message Created.
 class ChatMessageCreated extends ChatSocketEvent {
   final ChatMessage message;
   const ChatMessageCreated(this.message);
 }
 
+/// Chat Conversation Closed.
 class ChatConversationClosed extends ChatSocketEvent {
   final String reason;
   const ChatConversationClosed(this.reason);
 }
 
+/// Chat Message Rejected.
 class ChatMessageRejected extends ChatSocketEvent {
   final String reason;
   const ChatMessageRejected(this.reason);
 }
 
+/// Chat Socket Error Event.
 class ChatSocketErrorEvent extends ChatSocketEvent {
   final String reason;
   const ChatSocketErrorEvent(this.reason);
 }
 
-/// One connection per active chat screen: `wss://.../ws/chat/{bookingId}/?token={jwt}`.
-///
-/// Auth and booking participation are re-checked by the server on every
-/// connect, so on a dropped connection the caller can just call [connect]
-/// again with the same bookingId/token.
+/// Chat Socket.
 class ChatSocket {
   WebSocketChannel? _channel;
   StreamSubscription? _sub;
   final _controller = StreamController<ChatSocketEvent>.broadcast();
 
-  /// Fires once the underlying socket closes (network drop, server reject,
-  /// or [close] being called) so the UI can show a "reconnecting" state or
-  /// attempt [connect] again.
   final _doneController = StreamController<void>.broadcast();
 
   Stream<ChatSocketEvent> get events => _controller.stream;
+  /// Callback when done happens.
   Stream<void> get onDone => _doneController.stream;
 
+  /// Returns true if connected.
   bool get isConnected => _channel != null;
 
+  /// Opens the connection.
   void connect(int bookingId, String token) {
     close();
     final uri = Uri.parse(
@@ -59,32 +61,45 @@ class ChatSocket {
     ).replace(queryParameters: {'token': token});
 
     try {
-      _channel = WebSocketChannel.connect(uri);
-      _sub = _channel!.stream.listen(
+      ApiLog.ws('chat', 'connecting', 'booking=$bookingId');
+      final channel = WebSocketChannel.connect(uri);
+      _channel = channel;
+      var finished = false;
+      void finish() {
+        if (finished) return;
+        finished = true;
+        if (identical(_channel, channel)) _channel = null;
+        _doneController.add(null);
+      }
+
+      _sub = channel.stream.listen(
         _onData,
         onError: (e) {
-          if (kDebugMode) debugPrint('[ChatSocket] error: $e');
+          ApiLog.ws('chat', 'error', e);
           _controller.add(ChatSocketErrorEvent(e.toString()));
-          _doneController.add(null);
+          finish();
         },
         onDone: () {
-          if (kDebugMode) debugPrint('[ChatSocket] closed');
-          _doneController.add(null);
+          ApiLog.ws('chat', 'closed', 'code=${channel.closeCode} reason=${channel.closeReason}');
+          finish();
         },
       );
     } catch (e) {
-      if (kDebugMode) debugPrint('[ChatSocket] connect failed: $e');
+      ApiLog.ws('chat', 'connect failed', e);
+      _channel = null;
       _controller.add(ChatSocketErrorEvent(e.toString()));
       _doneController.add(null);
     }
   }
 
+  /// Callback when data happens.
   void _onData(dynamic raw) {
+    ApiLog.ws('chat', '← recv', raw);
     Map<String, dynamic> json;
     try {
       json = jsonDecode(raw as String) as Map<String, dynamic>;
     } catch (e) {
-      if (kDebugMode) debugPrint('[ChatSocket] malformed payload: $raw');
+      ApiLog.ws('chat', 'malformed payload', raw);
       return;
     }
 
@@ -105,24 +120,31 @@ class ChatSocket {
         _controller.add(ChatSocketErrorEvent(json['reason']?.toString() ?? 'unknown error'));
         break;
       default:
-        if (kDebugMode) debugPrint('[ChatSocket] unhandled event: ${json['type']}');
+        ApiLog.ws('chat', 'unhandled event', json['type']);
     }
   }
 
-  /// Sends `{ "type": "message.send", "content": ... }`. REST
-  /// (`ChatService.sendMessage`) remains available as a fallback if the
-  /// socket isn't connected.
+  /// Sends the message.
   void send(String content) {
-    _channel?.sink.add(jsonEncode({'type': 'message.send', 'content': content}));
+    final payload = jsonEncode({'type': 'message.send', 'content': content});
+    if (_channel == null) {
+      ApiLog.ws('chat', 'send skipped (not connected)', payload);
+      return;
+    }
+    ApiLog.ws('chat', '→ send', payload);
+    _channel!.sink.add(payload);
   }
 
+  /// Closes the connection.
   void close() {
+    if (_channel != null) ApiLog.ws('chat', 'closing');
     _sub?.cancel();
     _sub = null;
     _channel?.sink.close();
     _channel = null;
   }
 
+  /// Frees controllers / listeners when the screen closes.
   void dispose() {
     close();
     _controller.close();

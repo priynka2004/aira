@@ -1,3 +1,11 @@
+// FILE: screens/help_center_screen.dart
+// SCREEN: Help Center — support chat with the Sunndari team (polling, no socket).
+//
+// APIs used:
+//   GET /help_center/conversation/get/
+//   GET /help_center/messages/get_all/
+//   POST /help_center/messages/create/
+
 import 'dart:async';
 import 'package:flutter/foundation.dart' show kDebugMode, debugPrint;
 import 'package:flutter/material.dart';
@@ -7,13 +15,9 @@ import '../models/help_center/help_message.dart';
 import '../utils/app_session.dart';
 import '../utils/service_locator.dart';
 import '../api/help_center_notifier.dart';
+import 'support_tickets_screen.dart';
 
-/// Support chat with the Sunndari team.
-///
-/// Backed by `GET /help_center/conversation/get/`,
-/// `GET /help_center/messages/get_all/` and `POST /help_center/messages/create/`.
-/// There's no WebSocket for this feature, so new replies and status changes
-/// (e.g. the admin closing the conversation) are picked up by polling.
+/// SCREEN: Help Center — support chat with the Sunndari team (polling, no socket).
 class HelpCenterScreen extends StatefulWidget {
   const HelpCenterScreen({super.key});
 
@@ -21,6 +25,7 @@ class HelpCenterScreen extends StatefulWidget {
   State<HelpCenterScreen> createState() => _HelpCenterScreenState();
 }
 
+/// State of [HelpCenterScreen] — holds the screen data and logic.
 class _HelpCenterScreenState extends State<HelpCenterScreen> with WidgetsBindingObserver {
   static const _pollInterval = Duration(seconds: 8);
 
@@ -34,18 +39,17 @@ class _HelpCenterScreenState extends State<HelpCenterScreen> with WidgetsBinding
   String? _banner;
 
   int? _conversationId;
-  String? _status; // 'open' | 'running' | 'closed' | null (no conversation yet)
+  String? _status;
   final List<HelpMessage> _messages = [];
   Timer? _pollTimer;
 
-  // Optimistic outgoing messages get a local negative id (real server ids
-  // are always positive) so we can find and replace them once the send
-  // resolves, without colliding with anything from the backend.
   int _tempIdCounter = -1;
   Timer? _retryTimer;
 
+  /// My user id.
   int? get _myUserId => AppSession.instance.userId;
 
+  /// Runs once when the screen opens; starts: _load().
   @override
   void initState() {
     super.initState();
@@ -54,6 +58,7 @@ class _HelpCenterScreenState extends State<HelpCenterScreen> with WidgetsBinding
     _load();
   }
 
+  /// Frees controllers / listeners when the screen closes.
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
@@ -65,19 +70,15 @@ class _HelpCenterScreenState extends State<HelpCenterScreen> with WidgetsBinding
     super.dispose();
   }
 
+  /// Reacts to app going to background / foreground.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // Pause polling while the app is backgrounded/inactive and resume (with
-    // an immediate refresh so nothing feels stale) once it's foregrounded
-    // again — no point burning battery/data polling a screen no one sees.
     if (state == AppLifecycleState.resumed) {
       HelpCenterNotifier.instance.setSuppressed(true);
       if (_conversationId != null) {
         _poll();
         _ensurePolling();
       }
-      // Net wapas aate hi jo messages queue mein ruke the unhe turant
-      // bhejne ki koshish karo, retry timer ka wait mat karo.
       _retryPending();
     } else {
       HelpCenterNotifier.instance.setSuppressed(false);
@@ -86,14 +87,18 @@ class _HelpCenterScreenState extends State<HelpCenterScreen> with WidgetsBinding
     }
   }
 
+  /// Loads this screen's data.
+  /// Uses 2 APIs (see inline notes).
   Future<void> _load() async {
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
+      // API call: helpCenterService.getConversation → GET /help_center/conversation/get/
       final conversation = await _helpCenterService.getConversation();
       if (conversation != null) {
+        // API call: helpCenterService.getMessages → GET /help_center/messages/get_all/
         final history = await _helpCenterService.getMessages(
           conversation.conversationId,
           pageNum: 1,
@@ -124,22 +129,27 @@ class _HelpCenterScreenState extends State<HelpCenterScreen> with WidgetsBinding
       if (kDebugMode) print('[HelpCenterScreen] failed to load conversation: $e');
       if (!mounted) return;
       setState(() {
-        _error = "Couldn't load Help Center. Please try again.";
+        _error = "Couldn't Load Help Center. Please Try Again.";
         _loading = false;
       });
     }
   }
 
+  /// Ensures polling.
   void _ensurePolling() {
     _pollTimer ??= Timer.periodic(_pollInterval, (_) => _poll());
   }
 
+  /// Checks for new data.
+  /// Uses 2 APIs (see inline notes).
   Future<void> _poll() async {
     final conversationId = _conversationId;
     if (conversationId == null || !mounted) return;
 
     try {
+      // API call: helpCenterService.getConversation → GET /help_center/conversation/get/
       final conversation = await _helpCenterService.getConversation();
+      // API call: helpCenterService.getMessages → GET /help_center/messages/get_all/
       final history = await _helpCenterService.getMessages(
         conversationId,
         pageNum: 1,
@@ -149,8 +159,6 @@ class _HelpCenterScreenState extends State<HelpCenterScreen> with WidgetsBinding
       if (!mounted) return;
 
       setState(() {
-        // If /conversation/get/ no longer returns this id, it's been closed
-        // (that endpoint only ever returns the caller's non-closed one).
         _status = conversation != null && conversation.conversationId == conversationId
             ? conversation.status
             : 'closed';
@@ -160,16 +168,16 @@ class _HelpCenterScreenState extends State<HelpCenterScreen> with WidgetsBinding
           if (index == -1) {
             _messages.add(m);
           } else {
-            _messages[index] = m; // pick up any status change on an existing message
+            _messages[index] = m;
           }
         }
       });
       _scrollToBottom();
     } catch (_) {
-      // Transient poll failure — try again on the next tick.
     }
   }
 
+  /// Scrolls to bottom.
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scrollController.hasClients) return;
@@ -181,9 +189,7 @@ class _HelpCenterScreenState extends State<HelpCenterScreen> with WidgetsBinding
     });
   }
 
-  /// True for connectivity failures (no signal / DNS / timeout) as opposed
-  /// to a real error response from the backend. Used to tell "net off, keep
-  /// this queued and retry" apart from "server rejected it, stop retrying".
+  /// Returns true if network error.
   bool _isNetworkError(Object e) {
     final s = e.toString().toLowerCase();
     return s.contains('socketexception') ||
@@ -197,9 +203,7 @@ class _HelpCenterScreenState extends State<HelpCenterScreen> with WidgetsBinding
         s.contains('timed out');
   }
 
-  /// Adds the message to the thread immediately (single grey tick — mirrors
-  /// WhatsApp's "queued, not yet on the server" state) so the UI never waits
-  /// on the network, then tries to actually send it.
+  /// Sends the message.
   Future<void> _send() async {
     final content = _inputController.text.trim();
     if (content.isEmpty) return;
@@ -221,20 +225,15 @@ class _HelpCenterScreenState extends State<HelpCenterScreen> with WidgetsBinding
     await _attemptSend(optimistic);
   }
 
-  /// Sends (or resends) one message. On success the optimistic bubble is
-  /// replaced with the server copy (two grey ticks, and later "seen" once
-  /// polling picks that up). On a network error the bubble stays as-is —
-  /// still one grey tick — and a retry loop keeps trying until the
-  /// connection is back. Any other error (validation, server rejection)
-  /// drops the bubble and surfaces the existing error banner.
+  /// Attempts send.
+  /// API: helpCenterService.sendMessage → POST /help_center/messages/create/
   Future<void> _attemptSend(HelpMessage optimistic) async {
     try {
+      // API call: helpCenterService.sendMessage → POST /help_center/messages/create/
       final sent = await _helpCenterService.sendMessage(optimistic.content);
       if (!mounted) return;
       setState(() {
         if (sent.conversationId != null && sent.conversationId != _conversationId) {
-          // First message ever, or the previous conversation was closed —
-          // /messages/create/ opens a fresh one automatically.
           _conversationId = sent.conversationId;
           _status = 'open';
         }
@@ -250,25 +249,23 @@ class _HelpCenterScreenState extends State<HelpCenterScreen> with WidgetsBinding
     } catch (e) {
       if (kDebugMode) print('[HelpCenterScreen] send failed: $e');
       if (_isNetworkError(e)) {
-        // Net off — leave the single grey tick showing and keep retrying
-        // in the background instead of erroring out.
         _ensureRetrying();
         return;
       }
       if (!mounted) return;
       setState(() {
         _messages.removeWhere((m) => m.messageId == optimistic.messageId);
-        _banner = "That message couldn't be sent. Please try again.";
+        _banner = "That Message Couldn't Be Sent. Please Try Again.";
       });
     }
   }
 
+  /// Ensures retrying.
   void _ensureRetrying() {
     _retryTimer ??= Timer.periodic(const Duration(seconds: 5), (_) => _retryPending());
   }
 
-  /// Resends every still-queued (single-tick) message. Stops the retry
-  /// timer once nothing is left pending.
+  /// Retries pending.
   Future<void> _retryPending() async {
     final pending = _messages.where((m) => m.status == MessageStatus.sending && m.messageId < 0).toList();
 
@@ -283,6 +280,7 @@ class _HelpCenterScreenState extends State<HelpCenterScreen> with WidgetsBinding
     }
   }
 
+  /// Formats time.
   String _formatTime(String iso) {
     try {
       final d = DateTime.parse(iso).toLocal();
@@ -294,6 +292,7 @@ class _HelpCenterScreenState extends State<HelpCenterScreen> with WidgetsBinding
     }
   }
 
+  /// UI piece: bubble.
   Widget _bubble(HelpMessage message) {
     final mine = message.isMine(_myUserId);
     return Align(
@@ -340,13 +339,9 @@ class _HelpCenterScreenState extends State<HelpCenterScreen> with WidgetsBinding
     );
   }
 
-  /// The backend has no real per-message read receipt for Help Center —
-  /// only a conversation-level status (open/running/closed). So "seen" is
-  /// inferred the same way WhatsApp-style UIs do it without receipts: if
-  /// support has sent any reply that came after this message, they must
-  /// have read it to reply.
+  /// Seen by admin.
   bool _seenByAdmin(HelpMessage message) {
-    if (message.messageId < 0) return false; // still queued locally
+    if (message.messageId < 0) return false;
     final myId = _myUserId;
     DateTime myTime;
     try {
@@ -365,32 +360,32 @@ class _HelpCenterScreenState extends State<HelpCenterScreen> with WidgetsBinding
     return false;
   }
 
+  /// UI piece: message ticks.
   Widget _messageTicks(HelpMessage message) {
     if (message.messageId < 0) {
-      // Net off (or the request is still in flight) — queued, single tick.
       return const Icon(Icons.check_rounded, size: 14, color: Colors.white70);
     }
     if (_seenByAdmin(message)) {
-      // Support has replied after this message — two green ticks.
       return const Icon(Icons.done_all_rounded, size: 15, color: Color(0xFF34D399));
     }
-    // On the server, net is on, but support hasn't replied yet — two grey ticks.
     return const Icon(Icons.done_all_rounded, size: 15, color: Colors.white70);
   }
 
+  /// Status label.
   String get _statusLabel {
     switch (_status) {
       case 'open':
-        return 'Sent · waiting for reply';
+        return 'Sent · Waiting For Reply';
       case 'running':
-        return 'Support replied';
+        return 'Support Replied';
       case 'closed':
-        return 'Resolved — send a message to start a new one';
+        return 'Resolved — Send A Message To Start A New One';
       default:
         return '';
     }
   }
 
+  /// Status color.
   Color get _statusColor {
     switch (_status) {
       case 'open':
@@ -404,6 +399,7 @@ class _HelpCenterScreenState extends State<HelpCenterScreen> with WidgetsBinding
     }
   }
 
+  /// Builds the UI.
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -411,7 +407,19 @@ class _HelpCenterScreenState extends State<HelpCenterScreen> with WidgetsBinding
       body: SafeArea(
         child: Column(
           children: [
-            AiraScreenHeader(title: 'Help centre', onBack: () => Navigator.of(context).pop()),
+            AiraScreenHeader(title: 'Help Centre', onBack: () => Navigator.of(context).pop()),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 0, 24, 10),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SupportTicketsScreen())),
+                  icon: const Icon(Icons.confirmation_number_outlined, size: 18, color: AiraColors.rose),
+                  label: Text('My Support Tickets',
+                      style: AiraText.sans(fontSize: 13, fontWeight: FontWeight.w700, color: AiraColors.rose)),
+                ),
+              ),
+            ),
             if (_status != null)
               Container(
                 width: double.infinity,
@@ -459,7 +467,7 @@ class _HelpCenterScreenState extends State<HelpCenterScreen> with WidgetsBinding
                               child: Padding(
                                 padding: const EdgeInsets.symmetric(horizontal: 40),
                                 child: Text(
-                                  'Need a hand? Send us a message and our team will get back to you here.',
+                                  'Need A Hand? Send Us A Message And Our Team Will Get Back To You Here.',
                                   textAlign: TextAlign.center,
                                   style: AiraText.sans(fontSize: 13, color: AiraColors.charcoalSoft),
                                 ),
@@ -494,7 +502,7 @@ class _HelpCenterScreenState extends State<HelpCenterScreen> with WidgetsBinding
                           onSubmitted: (_) => _send(),
                           style: AiraText.sans(fontSize: 13.5),
                           decoration: InputDecoration(
-                            hintText: 'Type a message…',
+                            hintText: 'Type A Message…',
                             hintStyle: AiraText.sans(fontSize: 13.5, color: AiraColors.charcoalSoft),
                             border: InputBorder.none,
                             contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),

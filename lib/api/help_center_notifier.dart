@@ -1,3 +1,6 @@
+// FILE: api/help_center_notifier.dart
+// Polls Help Center for new support replies and shows a local notification when one arrives.
+
 import 'dart:async';
 import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -7,18 +10,7 @@ import 'help_center_service.dart';
 import '../utils/app_session.dart';
 import '../services/push_notification_service.dart';
 
-/// Help Center has no WebSocket, and [HelpCenterScreen]'s own polling only
-/// runs while that screen is on-screen (see its docs) — so an artist who
-/// isn't sitting there has no way to know support replied unless the
-/// backend sends a push for it. Until that exists server-side, this runs a
-/// light periodic check while the app is open and fires a local tray
-/// notification the first time it sees a reply it hasn't shown yet.
-///
-/// This only covers the app-in-foreground case — it's a Dart `Timer`, not
-/// a real push, so it can't wake the app from killed/backgrounded state.
-/// The full fix still needs the backend to send an actual FCM push (e.g.
-/// type `help_center`) when an admin replies; [PushNotificationService]
-/// already knows how to receive and route that the moment it exists.
+/// Help Center Notifier.
 class HelpCenterNotifier {
   HelpCenterNotifier._();
   static final HelpCenterNotifier instance = HelpCenterNotifier._();
@@ -28,16 +20,16 @@ class HelpCenterNotifier {
 
   Timer? _timer;
   bool _checking = false;
-  bool _suppressed = false; // true while HelpCenterScreen itself is open
+  bool _suppressed = false;
   HelpCenterService? _service;
 
+  /// Starts the process.
   void start(ApiService apiService) {
     _service ??= HelpCenterService(apiService);
     _timer ??= Timer.periodic(_checkInterval, (_) => _check());
   }
 
-  /// Call on logout so a different user logging in on the same device
-  /// doesn't inherit the previous user's "last notified" state.
+  /// Stops the process.
   Future<void> stop() async {
     _timer?.cancel();
     _timer = null;
@@ -46,15 +38,13 @@ class HelpCenterNotifier {
     await prefs.remove(_lastNotifiedKey);
   }
 
-  /// Call `true` from [HelpCenterScreen.initState] and `false` from its
-  /// dispose — no point popping a tray notification for a reply the user
-  /// is already looking at, and it marks whatever's currently newest as
-  /// "seen" so leaving the screen doesn't immediately re-notify for it.
+  /// Sets suppressed.
   void setSuppressed(bool suppressed) {
     _suppressed = suppressed;
     if (suppressed) _markLatestAsNotified();
   }
 
+  /// Marks latest as notified.
   Future<void> _markLatestAsNotified() async {
     final service = _service;
     if (service == null) return;
@@ -71,10 +61,10 @@ class HelpCenterNotifier {
         await _saveLastNotified(history.data.first.messageId);
       }
     } catch (_) {
-      // Best-effort — worst case the next _check() notifies once more.
     }
   }
 
+  /// Runs the check.
   Future<void> _check() async {
     if (_checking || _suppressed) return;
     final service = _service;
@@ -95,7 +85,7 @@ class HelpCenterNotifier {
 
       final latest = history.data.first;
       final myId = AppSession.instance.userId;
-      if (myId != null && latest.senderId == myId) return; // my own message
+      if (myId != null && latest.senderId == myId) return;
 
       final lastNotified = await _getLastNotified();
       if (lastNotified != null && latest.messageId <= lastNotified) return;
@@ -109,11 +99,13 @@ class HelpCenterNotifier {
     }
   }
 
+  /// Gets last notified.
   Future<int?> _getLastNotified() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getInt(_lastNotifiedKey);
   }
 
+  /// Saves last notified.
   Future<void> _saveLastNotified(int messageId) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(_lastNotifiedKey, messageId);

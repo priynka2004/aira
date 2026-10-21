@@ -1,3 +1,7 @@
+// FILE: models/help_center/help_message.dart  |  MODEL
+// Help Center message + its send status.
+
+/// Enum: Message Status values.
 enum MessageStatus {
   sending,
   sent,
@@ -5,8 +9,7 @@ enum MessageStatus {
   seen,
 }
 
-/// Matches the backend's Help Center message shape
-/// (`GET /help_center/messages/get_all/`, `POST /help_center/messages/create/`).
+/// Model: Help Message.
 class HelpMessage {
   final int messageId;
   final int? conversationId;
@@ -24,6 +27,7 @@ class HelpMessage {
     this.status = MessageStatus.sent,
   });
 
+  /// Builds this object from API JSON.
   factory HelpMessage.fromJson(Map<String, dynamic> json) {
     int parseInt(dynamic v) {
       if (v == null) return 0;
@@ -61,5 +65,6 @@ class HelpMessage {
     );
   }
 
+  /// Returns true if mine.
   bool isMine(int? currentUserId) => currentUserId != null && senderId == currentUserId;
 }

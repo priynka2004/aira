@@ -1,4 +1,9 @@
+// FILE: app_shell.dart  |  MAIN APP SHELL (after login)
+// Hosts the bottom-nav tabs: Home, Bookings/Business, Calendar, Earnings, Profile (+ Grow / Learn).
+// Loads bookings + statuses once, listens to live Firestore booking updates, and enforces the profile gate.
+
 import 'dart:async';
+import 'package:aira_app/screens/booking_detail_screen.dart';
 import 'package:flutter/foundation.dart' show kDebugMode, debugPrint;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -7,6 +12,7 @@ import 'theme/tokens.dart';
 import 'widgets/common.dart';
 import 'screens/home_screen.dart';
 import 'screens/business_screen.dart';
+import 'screens/calendar_screen.dart';
 import 'screens/grow_screen.dart';
 import 'screens/learning_screen.dart';
 import 'screens/settings_screen.dart';
@@ -24,10 +30,12 @@ import 'models/core/status_item.dart';
 import 'models/artist/create_portfolio.dart';
 import 'models/enums/media_type_enum.dart';
 import 'helper/booking_stats.dart';
+import 'utils/profile_completeness.dart';
+import 'utils/share_profile.dart';
+import 'screens/auth/registration_status_screen.dart';
+import 'screens/onboarding/artist_page_setup_screen.dart';
 
-/// Root widget — owns all shared state (current screen, sub-tabs, booking
-/// slots, toast) and the real Sunndari data: artist profile + bookings,
-/// fetched from the API and fed down into each screen.
+/// Main app container with bottom navigation (after login).
 class AiraAppShell extends StatefulWidget {
   const AiraAppShell({super.key});
 
@@ -35,81 +43,104 @@ class AiraAppShell extends StatefulWidget {
   State<AiraAppShell> createState() => _AiraAppShellState();
 }
 
-class _AiraAppShellState extends State<AiraAppShell> {
-  String _screen = 'home'; // home | business | grow | learn | profile
+/// Holds current tab, bookings, statuses and live Firestore listeners.
+class _AiraAppShellState extends State<AiraAppShell> with WidgetsBindingObserver {
+  String _screen = 'home';
   String _businessTab = 'insights';
   String _growTab = 'marketing';
   String? _toast;
   Timer? _toastTimer;
 
-  // ── Real data, loaded from the Sunndari API ────────────────────────────
   bool _loading = true;
   ArtistProfile? _profile;
   List<Booking> _bookings = [];
   List<StatusItem> _bookingStatuses = [];
   bool _hasClash = false;
-  // Live Firestore listener — keeps [_bookings] in sync the instant the
-  // backend writes a booking change to `bookings/<bookingId>`, without
-  // waiting for a manual reload. Additive to the REST load above, same
-  // pattern as [PushNotificationService]'s Firestore badge listener.
+  bool _profileIncomplete = false;
+  bool _gateChecked = false;
+  String? _profileHint;
   StreamSubscription<List<Booking>>? _bookingsSub;
-  // customerId → real display name (from GET /users/profile/get/), so the
-  // booking list, chat app bar, etc show the actual customer instead of a
-  // static "Customer #<id>" placeholder. Filled in best-effort after
-  // bookings load; falls back to the id-based label per-customer until
-  // (or if) that lookup resolves.
   final Map<int, String> _customerNames = {};
+  final Map<int, String> _packageNames = {}; // packageId → package name (for the booking cards)
 
+  /// Runs once when the screen opens; starts: _enforceProfileGate(), _loadData().
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _enforceProfileGate();
     _loadData();
-    // Reached right after login *and* on every relaunch with a saved
-    // session (splash screen routes straight here) — the one place we're
-    // guaranteed to be logged in, so it's the right spot to register for
-    // push notifications and sync the current unread state.
+    // Auto-refresh: every 45 s while the app is open, and whenever a push arrives.
+    _autoRefreshTimer = Timer.periodic(const Duration(seconds: 45), (_) {
+      if (_appInForeground) _loadData(silent: true);
+    });
+    NotificationBadge.instance.newNotificationTick.addListener(_onPushArrived);
     PushNotificationService.instance.initMessaging();
     HelpCenterNotifier.instance.start(ServiceLocator.apiService);
     NotificationBadge.instance.refresh();
-    // Post-frame so `context` is safely mounted for the dialog — this is a
-    // one-time prompt (see AutostartHelper), no-ops after the first run.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) AutostartHelper.promptIfNeeded(context);
     });
   }
 
+  Timer? _autoRefreshTimer;
+  bool _appInForeground = true;
+  bool _refreshing = false;
+  DateTime _lastLoad = DateTime.fromMillisecondsSinceEpoch(0);
+  int? _liveArtistId;
+
+  /// App went to background / came back.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _appInForeground = state == AppLifecycleState.resumed;
+    if (_appInForeground) {
+      _loadData(silent: true); // coming back to the app → fetch the latest
+      NotificationBadge.instance.refresh();
+    }
+  }
+
+  /// A push notification arrived while the app is open → refresh bookings.
+  void _onPushArrived() => _loadData(silent: true);
+
+  /// Enforces profile gate.
+  Future<void> _enforceProfileGate() async {
+    ArtistProfile? profile;
+    try {
+      profile = await ServiceLocator.artistService.getProfile();
+    } catch (_) {}
+    final complete = await ArtistPageSetup.isProfileComplete(profile: profile);
+    if (!mounted) return;
+    if (complete) {
+      if (await ArtistPageReview.pending()) {
+        if (!mounted) return;
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const ArtistPageUnderReviewScreen()),
+              (r) => false,
+        );
+        return;
+      }
+      setState(() => _gateChecked = true);
+      return;
+    }
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => RegistrationStatusScreen(approvalStatusId: profile?.approvalStatusId)),
+          (r) => false,
+    );
+  }
+
+  /// Frees controllers / listeners when the screen closes.
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _autoRefreshTimer?.cancel();
+    NotificationBadge.instance.newNotificationTick.removeListener(_onPushArrived);
     _toastTimer?.cancel();
+    _reloadTimer?.cancel();
     _bookingsSub?.cancel();
     super.dispose();
   }
 
-  /// Subscribes to this artist's live bookings in Firestore
-  /// (`bookings` collection, filtered by `artistId`) and keeps
-  /// [_bookings] up to date in real time. Runs alongside the REST load
-  /// in [_loadData] — whichever source updates first wins on screen;
-  /// there's nothing to reconcile since the backend is expected to keep
-  /// both in sync.
-  ///
-  /// Merges into the existing REST-loaded list by `bookingId` rather than
-  /// replacing it outright. The Firestore mirror can lag behind or not
-  /// yet cover every historical booking (see the "known gap" notes on
-  /// this collection), so a live snapshot is often a strict *subset* of
-  /// what REST already returned — blindly replacing [_bookings] with
-  /// that subset used to silently wipe every booking Firestore hadn't
-  /// caught up on yet, leaving the screen blank a moment after the real
-  /// data had already rendered. Merging means a live update can only add
-  /// or refresh bookings, never make correctly-loaded ones disappear.
-  ///
-  /// [artistId] must be the artist-table id (e.g. `Booking.artistId`,
-  /// `ArtistProfile.artistId`) — NOT [AppSession.instance.userId]. Those
-  /// are two different ids for the same person (this account is
-  /// `userId=8` but `artistId=5`); passing the wrong one silently matches
-  /// zero real bookings and, if some other doc coincidentally has that
-  /// value, can pull in a stray customerId that doesn't correspond to an
-  /// actual user (seen as a spurious 400 on
-  /// GET /users/profile/get/?user_id=<wrong-id> from [_loadCustomerNames]).
+  /// Listens to for live bookings.
   void _listenForLiveBookings(int artistId) {
     _bookingsSub?.cancel();
     _bookingsSub = ServiceLocator.firestoreBookingService
@@ -119,12 +150,12 @@ class _AiraAppShellState extends State<AiraAppShell> {
         if (!mounted || liveBookings.isEmpty) return;
         final merged = {for (final b in _bookings) b.bookingId: b};
         for (final b in liveBookings) {
+          if (_paymentBlockedIds.contains(b.bookingId)) continue;
           final existing = merged[b.bookingId];
           if (existing == null) {
-            // A booking REST hasn't shown us yet — worth adding even if
-            // the Firestore copy turns out to be imperfect; there's no
-            // good REST copy to protect here.
-            merged[b.bookingId] = b;
+            // Booking the server list (paid only) does not contain: it may be UNPAID, or newly paid.
+            // Never show it from Firestore; ask the server once (no reload loops).
+            if (_unconfirmedLiveIds.add(b.bookingId)) _scheduleRestReload();
             continue;
           }
           if (_isNewerOrEqual(b, existing)) {
@@ -143,6 +174,7 @@ class _AiraAppShellState extends State<AiraAppShell> {
           _hasClash = _detectClash(bookings, _bookingStatuses);
         });
         _loadCustomerNames(bookings);
+        _loadPackageNames(bookings);
       },
       onError: (e) {
         if (kDebugMode) debugPrint('[AppShell] live bookings listener error: $e');
@@ -150,10 +182,7 @@ class _AiraAppShellState extends State<AiraAppShell> {
     );
   }
 
-  /// True if [candidate]'s `updatedAt` is newer than or equal to
-  /// [current]'s — or if either timestamp is unparseable, in which case
-  /// we conservatively let the candidate through rather than get stuck
-  /// never updating (matches the old behaviour for that edge case only).
+  /// Returns true if newer or equal.
   bool _isNewerOrEqual(Booking candidate, Booking current) {
     final a = DateTime.tryParse(candidate.updatedAt ?? '');
     final b = DateTime.tryParse(current.updatedAt ?? '');
@@ -161,24 +190,22 @@ class _AiraAppShellState extends State<AiraAppShell> {
     return !a.isBefore(b);
   }
 
-  /// Takes only the fields that are genuinely meant to change live —
-  /// `statusId` and the cancellation info that comes with it — from the
-  /// Firestore copy [live], and keeps every other field (crucially
-  /// `bookingDate`/`startTime`/`endTime`/`totalAmount`) from the
-  /// already-correct [rest] copy.
-  ///
-  /// The Firestore `bookings` mirror has been seen holding a genuinely
-  /// **stale but validly-formatted** `bookingDate` for a booking that was
-  /// rescheduled after the mirror doc was written (e.g. REST correctly
-  /// shows `2026-08-21` while the same doc in Firestore still says
-  /// `2026-08-17`). That's not a missing/malformed value — it's wrong but
-  /// perfectly parseable — so no amount of validating the *shape* of the
-  /// Firestore data can catch it. The only reliable fix is to simply never
-  /// let Firestore's date/time/amount fields overwrite REST's for a
-  /// booking REST already loaded correctly. This is what silently shifted
-  /// "today's bookings" (and the dashboard numbers built from it) from the
-  /// right value down to 0 the instant this live listener fired.
+  Timer? _reloadTimer;
+  /// Bookings the server refused to confirm because payment is incomplete (hidden until the app restarts).
+  final Set<int> _paymentBlockedIds = {};
+  final Set<int> _unconfirmedLiveIds = {}; // live bookings not in the paid list — checked with the server once
+
+  /// Re-fetches bookings from REST (debounced) — used when Firestore shows a booking we don't know yet.
+  void _scheduleRestReload() {
+    _reloadTimer?.cancel();
+    _reloadTimer = Timer(const Duration(seconds: 2), () {
+      if (mounted) _loadData();
+    });
+  }
+
+  /// Merges live fields (status etc. from Firestore, everything else kept from REST).
   Booking _mergeLiveFields(Booking rest, Booking live) {
+    String? pick(String? a, String? b) => (a != null && a.isNotEmpty) ? a : b;
     return Booking(
       bookingId: rest.bookingId,
       customerId: rest.customerId,
@@ -191,6 +218,7 @@ class _AiraAppShellState extends State<AiraAppShell> {
       startTime: rest.startTime,
       endTime: rest.endTime,
       statusId: live.statusId,
+      paymentStatusId: live.paymentStatusId ?? rest.paymentStatusId,
       totalAmount: rest.totalAmount,
       notes: rest.notes,
       cancelledBy: live.cancelledBy ?? rest.cancelledBy,
@@ -198,30 +226,34 @@ class _AiraAppShellState extends State<AiraAppShell> {
       expiresAt: rest.expiresAt,
       createdAt: rest.createdAt,
       updatedAt: live.updatedAt ?? rest.updatedAt,
+      onMyWayAt: pick(live.onMyWayAt, rest.onMyWayAt),
+      arrivedAt: pick(live.arrivedAt, rest.arrivedAt),
+      serviceStartedAt: pick(live.serviceStartedAt, rest.serviceStartedAt),
+      serviceCompletedAt: pick(live.serviceCompletedAt, rest.serviceCompletedAt),
+      platformFee: rest.platformFee,
+      netAmount: rest.netAmount,
+      travelFee: rest.travelFee,
+      travelTimeMinutes: rest.travelTimeMinutes,
+      returnBufferMinutes: rest.returnBufferMinutes,
+      addons: rest.addons,
     );
   }
 
-  // ── Data loading ─────────────────────────────────────────────────────
-  Future<void> _loadData() async {
-    setState(() => _loading = true);
+  /// Loads data.
+  /// [silent] = background refresh: no spinner, no error toast.
+  Future<void> _loadData({bool silent = false}) async {
+    if (_refreshing && silent) return; // one background refresh at a time
+    _refreshing = true;
+    if (!silent) setState(() => _loading = true);
     try {
-      // Booking-statuses is fetched separately (own try/catch) from
-      // profile+bookings: previously all three were in one Future.wait,
-      // so a single bad StatusItem (or a transient failure on that one
-      // endpoint) took down the ENTIRE dashboard — no bookings, no
-      // profile, nothing — even though profile+bookings had already
-      // succeeded. Every status lookup across the app (booking list
-      // badges, Insights completion rate, Finance) depends on this list,
-      // so it still matters a lot, but it must never block the booking
-      // list itself from rendering.
       final results = await Future.wait([
         ServiceLocator.artistService.getProfile(),
-        // Higher limit so date-range filters on Bookings/Finance can reach
-        // back into older bookings, not just the most recent ~50.
         ServiceLocator.bookingService.getAllBookings(limit: 300),
       ]);
       final profile = results[0] as ArtistProfile;
-      final bookings = results[1] as List<Booking>;
+      // The server returns PAID bookings only (filter_key=paymentStatus&filter_value=paid).
+      final bookings = (results[1] as List<Booking>).where((b) => !_paymentBlockedIds.contains(b.bookingId)).toList();
+      _unconfirmedLiveIds.removeWhere((id) => bookings.any((b) => b.bookingId == id));
 
       List<StatusItem> statuses = [];
       try {
@@ -246,26 +278,39 @@ class _AiraAppShellState extends State<AiraAppShell> {
         debugPrint('[Dashboard] REST load done: ${bookings.length} bookings, today=$todayCount');
       }
       _loadCustomerNames(bookings);
-      // Only safe to start now — needs the real artistId from [profile],
-      // not available until this REST call resolves (see the doc comment
-      // on [_listenForLiveBookings] for why it can't use
-      // AppSession.instance.userId instead).
-      _listenForLiveBookings(profile.artistId);
+      _loadPackageNames(bookings);
+      _checkProfileCompleteness(profile);
+      if (_liveArtistId != profile.artistId) {
+        _liveArtistId = profile.artistId;
+        _listenForLiveBookings(profile.artistId);
+      }
+      _lastLoad = DateTime.now();
     } catch (e) {
       if (!mounted) return;
-      setState(() => _loading = false);
-      _showErrorToast(e, onRetry: _loadData);
+      if (!silent) {
+        setState(() => _loading = false);
+        _showErrorToast(e, onRetry: _loadData);
+      }
+    } finally {
+      _refreshing = false;
     }
   }
 
-  /// Resolves each distinct `customerId` in [bookings] to the customer's
-  /// real name via GET /users/profile/get/, so slots/chat show a real
-  /// name instead of the "Customer #<id>" placeholder. Every customer is
-  /// a different user with a different id — this fetches each one's own
-  /// profile rather than reusing/guessing a single static value. Runs
-  /// after the main load so it never blocks the booking list from
-  /// appearing, and each lookup is independently best-effort — one
-  /// customer's profile failing to load doesn't affect the others.
+  /// Loads the package (service) name of every booking
+  Future<void> _loadPackageNames(List<Booking> bookings) async {
+    final ids = bookings.map((b) => b.packageId).toSet()
+      ..removeWhere((id) => id == 0 || _packageNames.containsKey(id));
+    if (ids.isEmpty) return;
+    await Future.wait(ids.map((id) async {
+      try {
+        final pkg = await ServiceLocator.artistService.getPackage(id);
+        if (!mounted) return;
+        if (pkg.name.trim().isNotEmpty) setState(() => _packageNames[id] = pkg.name.trim());
+      } catch (_) {}
+    }));
+  }
+
+  /// Loads customer names.
   Future<void> _loadCustomerNames(List<Booking> bookings) async {
     final ids = bookings.map((b) => b.customerId).toSet()
       ..removeWhere((id) => id == 0 || _customerNames.containsKey(id));
@@ -279,11 +324,24 @@ class _AiraAppShellState extends State<AiraAppShell> {
           setState(() => _customerNames[id] = profile.name.trim());
         }
       } catch (_) {
-        // Best-effort — that customer keeps the "Customer #<id>" fallback.
       }
     }));
   }
 
+  /// Checks profile completeness.
+  Future<void> _checkProfileCompleteness([ArtistProfile? profile]) async {
+    try {
+      final c = await ProfileCompleteness.load(profile: profile ?? _profile);
+      if (!mounted) return;
+      setState(() {
+        _profileIncomplete = !c.isComplete;
+        _profileHint = c.nextHint;
+      });
+    } catch (_) {
+    }
+  }
+
+  /// Detects clash.
   bool _detectClash(List<Booking> bookings, List<StatusItem> statuses) {
     final active = bookings.where((b) {
       final label = _statusLabel(b.statusId, statuses);
@@ -300,14 +358,17 @@ class _AiraAppShellState extends State<AiraAppShell> {
     return false;
   }
 
+  /// Status label.
   String _statusLabel(int statusId, List<StatusItem> statuses) {
     final m = statuses.where((s) => s.statusId == statusId);
     return m.isNotEmpty ? m.first.name.toLowerCase() : '';
   }
 
+  /// Maps status.
   SlotStatus _mapStatus(int statusId, {String? cancelledBy}) =>
       BookingStats.mapStatus(statusId, _bookingStatuses, cancelledBy: cancelledBy);
 
+  /// Formats time.
   String _formatTime(String startTime) {
     try {
       final parts = startTime.split(':');
@@ -332,15 +393,15 @@ class _AiraAppShellState extends State<AiraAppShell> {
       date: b.bookingDate,
       time: _formatTime(b.startTime),
       rawStartTime: b.startTime,
-      client: _customerNames[b.customerId] ?? 'Customer #${b.customerId}',
-      service: 'Package #${b.packageId}',
+      client: _customerNames[b.customerId] ?? 'Customer',
+      service: _packageNames[b.packageId] ?? 'Service',
       status: _mapStatus(b.statusId, cancelledBy: b.cancelledBy),
       amount: b.totalAmount,
     ))
         .toList();
   }
 
-  // ── Toast helpers ────────────────────────────────────────────────────
+  /// Shows toast.
   void _showToast(String text) {
     _toastTimer?.cancel();
     setState(() => _toast = text);
@@ -349,22 +410,50 @@ class _AiraAppShellState extends State<AiraAppShell> {
     });
   }
 
-  /// Shows a categorized, user-readable error (network/auth/server/etc.)
-  /// via [AppFeedback], with an optional retry action.
+  /// Shows error toast.
   void _showErrorToast(Object error, {VoidCallback? onRetry}) {
     if (!mounted) return;
     AppFeedback.showError(context, error, onRetry: onRetry);
   }
 
+  /// Navigates to.
+  /// Navigates to.
   void _navigate(String target, [String? tab]) {
+    // नया कोड: अगर बुकिंग डिटेल पर क्लिक हुआ है, तो अगली स्क्रीन पर भेजें
+    if (target == 'booking_detail' && tab != null) {
+      final bId = int.tryParse(tab);
+      if (bId != null) {
+        Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => BookingDetailScreen(
+            bookingId: bId,
+            statuses: _bookingStatuses,
+            onRefresh: _loadData,
+          ),
+        ));
+        return;
+      }
+    }
+
     setState(() {
-      _screen = target;
-      if (target == 'business' && tab != null) _businessTab = tab;
-      if (target == 'grow' && tab != null) _growTab = tab;
+      if (target == 'bookings') {
+        _screen = 'business';
+        _businessTab = 'booking';
+      } else if (target == 'earnings') {
+        _screen = 'business';
+        _businessTab = 'finance';
+      } else {
+        _screen = target;
+        if (target == 'business' && tab != null) _businessTab = tab;
+        if (target == 'grow' && tab != null) _growTab = tab;
+      }
     });
+
+    if (target == 'home') _checkProfileCompleteness();
+    // Opening a tab → refresh if the data is older than 10 s
+    if (DateTime.now().difference(_lastLoad).inSeconds > 10) _loadData(silent: true);
   }
 
-  // ── Booking status updates (real API) ──────────────────────────────────
+  /// Updates booking status.
   Future<void> _updateBookingStatus(BookingSlot slot, SlotStatus next, {String? reason}) async {
     if (slot.bookingId == null) return;
     final apiStatus = switch (next) {
@@ -375,27 +464,34 @@ class _AiraAppShellState extends State<AiraAppShell> {
       SlotStatus.noShow => BookingStatusEnum.noShow,
       _ => BookingStatusEnum.confirmed,
     };
-    _showToast('Updating booking…');
+    _showToast('Updating Booking…');
     try {
       await ServiceLocator.bookingService.updateBookingStatus(slot.bookingId!, apiStatus, reason: reason);
       await _loadData();
-      _showToast('Booking updated ✓');
+      _showToast('Booking Updated ✓');
     } catch (e) {
+      final text = e.toString().toLowerCase();
+      if (text.contains('payment') && (text.contains('complete') || text.contains('pending'))) {
+        // The server says payment is incomplete → hide this booking (it must not be shown yet).
+        _paymentBlockedIds.add(slot.bookingId!);
+        if (mounted) {
+          setState(() => _bookings = _bookings.where((b) => b.bookingId != slot.bookingId).toList());
+        }
+        _showToast('This Booking Is Waiting For The Customer\'s Payment');
+        return;
+      }
       _showErrorToast(e, onRetry: () => _updateBookingStatus(slot, next, reason: reason));
     }
   }
 
+  /// Logs the user out.
   Future<void> _logout() async {
-    // Must run before authService.logout() clears the session — it needs
-    // AppSession.instance.userId to know which Firestore token doc /
-    // topic to deactivate.
+
     await PushNotificationService.instance.resetForLogout();
     HelpCenterNotifier.instance.stop();
     try {
       await ServiceLocator.authService.logout();
     } catch (_) {
-      // Even if the server-side logout call fails, the local session has
-      // already been cleared by AuthService — proceed to the login screen.
     }
     NotificationBadge.instance.clear();
     if (!mounted) return;
@@ -403,14 +499,13 @@ class _AiraAppShellState extends State<AiraAppShell> {
         .pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const LoginScreen()), (r) => false);
   }
 
+  /// Posts portfolio.
   Future<void> _postPortfolio() async {
     try {
       final picker = ImagePicker();
       final xfile = await picker.pickImage(source: ImageSource.gallery, imageQuality: 85);
       if (xfile == null) return;
 
-      // Best-effort sub_category_id: use the artist's first configured
-      // service if we can find one, otherwise fall back to 1.
       int subCategoryId = 1;
       try {
         final services = await ServiceLocator.artistService.getAllServices();
@@ -422,22 +517,22 @@ class _AiraAppShellState extends State<AiraAppShell> {
           }
         }
       } catch (_) {
-        // ignore — fall back to default
       }
 
-      _showToast('Uploading to your portfolio…');
+      _showToast('Uploading To Your Portfolio…');
       await ServiceLocator.artistService.createPortfolio(CreatePortfolio(
         mediaType: MediaTypeEnum.image,
         subCategoryId: subCategoryId,
         file: xfile,
-        caption: 'Shared via AiRA',
+        caption: 'Shared Via Sunndari',
       ));
-      _showToast('Added to your portfolio ✓');
+      _showToast('Added To Your Portfolio ✓');
     } catch (e) {
       _showErrorToast(e);
     }
   }
 
+  /// Date label.
   String get _dateLabel {
     final now = DateTime.now();
     const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -448,15 +543,24 @@ class _AiraAppShellState extends State<AiraAppShell> {
     return '${days[now.weekday - 1]}, ${now.day} ${months[now.month - 1]}';
   }
 
+  /// Active nav key.
+  String get _activeNavKey {
+    if (_screen == 'business') return _businessTab == 'finance' ? 'earnings' : 'bookings';
+    if (_screen == 'calendar' || _screen == 'profile' || _screen == 'home') return _screen;
+    return '';
+  }
+
+  /// Builds the UI.
   @override
   Widget build(BuildContext context) {
+    if (!_gateChecked) {
+      return const Scaffold(
+        backgroundColor: AiraColors.bg,
+        body: Center(child: CircularProgressIndicator(strokeWidth: 2.4, color: AiraColors.rose)),
+      );
+    }
     final stats = BookingStats(_bookings, _bookingStatuses);
     final todays = stats.todaysAppointments;
-    // Requests genuinely awaiting the artist's Accept/Reject — not scoped
-    // to today, since a pending request for any future date still needs a
-    // response now. (Previously this counted already-`confirmed` bookings
-    // as a stand-in, back when the backend's real `pending` status wasn't
-    // being recognized by the app at all — see SlotStatus.pending.)
     final pendingConfirmationsCount =
         _bookings.where((b) => _mapStatus(b.statusId, cancelledBy: b.cancelledBy) == SlotStatus.pending).length;
 
@@ -473,7 +577,15 @@ class _AiraAppShellState extends State<AiraAppShell> {
           bookings: _bookings,
           bookingStatuses: _bookingStatuses,
           customerNames: _customerNames,
-          onWithdraw: () => AppFeedback.showInfo(context, "Payouts aren't available in this preview yet"),
+          onWithdraw: () => AppFeedback.showInfo(context, "Payouts Aren't Available In This Preview Yet"),
+          onRefresh: _loadData,
+        );
+        break;
+      case 'calendar':
+        mainScreen = CalendarScreen(
+          slots: _slots,
+          statuses: _bookingStatuses,
+          onUpdateStatus: _updateBookingStatus,
           onRefresh: _loadData,
         );
         break;
@@ -482,7 +594,7 @@ class _AiraAppShellState extends State<AiraAppShell> {
           activeTab: _growTab,
           onTabSelect: (t) => setState(() => _growTab = t),
           onPost: _postPortfolio,
-          onShare: () => _showToast('Look shared with client'),
+          onShare: () => shareArtistProfile(context),
         );
         break;
       case 'learn':
@@ -503,19 +615,37 @@ class _AiraAppShellState extends State<AiraAppShell> {
           debugPrint('[Dashboard] HomeScreen build: loading=$_loading, '
               'bookingsToday=${todays.length}, bookingsTotal=${_bookings.length}');
         }
+
+        // --- MAP TODAY'S BOOKINGS TO BookingSlot FOR HOME SCREEN ---
+        final todaysSlots = todays.map((b) => BookingSlot(
+          bookingId: b.bookingId,
+          date: b.bookingDate,
+          time: _formatTime(b.startTime),
+          rawStartTime: b.startTime,
+          client: _customerNames[b.customerId] ?? 'Customer',
+          service: _packageNames[b.packageId] ?? 'Service',
+          status: _mapStatus(b.statusId, cancelledBy: b.cancelledBy),
+          amount: b.totalAmount,
+        )).toList()
+          ..sort((a, b) => a.rawStartTime?.compareTo(b.rawStartTime ?? '') ?? 0); // Sort by time
+
         mainScreen = HomeScreen(
           onNavigate: _navigate,
           artistName: AppSession.instance.name ?? '',
           dateLabel: _dateLabel,
           loading: _loading,
-          bookingsToday: todays.length,
+          bookingsThisMonth: stats.thisMonthAppointments.length,
           expectedEarningsToday: todays.fold<double>(0, (s, b) => s + b.totalAmount),
           pendingConfirmations: pendingConfirmationsCount,
           avgRating: _profile?.avgRating ?? 0,
+          showCompleteProfileBanner: !_loading && _profileIncomplete,
+          profileHint: _profileHint,
+          todaysBookings: todaysSlots, // PASSING THE DATA HERE
+          onCompleteProfile: () => _navigate('profile'),
           briefingText: todays.isEmpty
-              ? "You're all clear — no bookings on the calendar today."
-              : 'You have ${todays.length} booking${todays.length == 1 ? '' : 's'} and '
-              '₹${todays.fold<double>(0, (s, b) => s + b.totalAmount).toStringAsFixed(0)} expected today.'
+              ? "You're All Clear — No Bookings On The Calendar Today."
+              : 'You Have ${todays.length} Booking${todays.length == 1 ? '' : 's'} And '
+              '₹${todays.fold<double>(0, (s, b) => s + b.totalAmount).toStringAsFixed(0)} Expected Today.'
               '${_hasClash ? ' Two bookings clash — check your calendar.' : ''}',
         );
     }
@@ -527,7 +657,15 @@ class _AiraAppShellState extends State<AiraAppShell> {
         child: ClipRect(
           child: Stack(
             children: [
-              Positioned.fill(child: mainScreen),
+              Positioned.fill(
+                child: (_screen == 'home' || _screen == 'business' || _screen == 'calendar')
+                    ? RefreshIndicator(
+                        color: AiraColors.rose,
+                        onRefresh: () => _loadData(silent: true),
+                        child: mainScreen,
+                      )
+                    : mainScreen,
+              ),
               if (_toast != null) AiraToast(text: _toast!),
             ],
           ),
@@ -535,7 +673,7 @@ class _AiraAppShellState extends State<AiraAppShell> {
       ),
       bottomNavigationBar: SafeArea(
         top: false,
-        child: AiraBottomNav(active: _screen, onSelect: _navigate),
+        child: AiraBottomNav(active: _activeNavKey, onSelect: _navigate),
       ),
     );
   }

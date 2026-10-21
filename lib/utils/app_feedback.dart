@@ -1,5 +1,9 @@
+// FILE: utils/app_feedback.dart
+// Snackbar helper: success / error / warning / info messages + friendly error text.
+
 import 'package:flutter/material.dart';
 
+/// App Feedback.
 class AppFeedback {
   AppFeedback._();
 
@@ -55,7 +59,7 @@ class AppFeedback {
     );
   }
 
-  /// Green success toast.
+  /// Shows success.
   static void showSuccess(BuildContext context, String message) => _show(
     context,
     message: message,
@@ -63,9 +67,7 @@ class AppFeedback {
     icon: Icons.check_circle_outline,
   );
 
-  /// Red error toast. Automatically strips a leading "Exception: " prefix,
-  /// since every thrown [Exception] in this app already carries a clean,
-  /// user-readable message.
+  /// Shows error.
   static void showError(BuildContext context, Object error,
       {String? fallback, VoidCallback? onRetry}) {
     final message = _cleanError(error, fallback: fallback);
@@ -80,7 +82,7 @@ class AppFeedback {
     );
   }
 
-  /// Amber/warning toast — for non-fatal issues the user should know about.
+  /// Shows warning.
   static void showWarning(BuildContext context, String message) => _show(
     context,
     message: message,
@@ -88,7 +90,7 @@ class AppFeedback {
     icon: Icons.warning_amber_rounded,
   );
 
-  /// Neutral/info toast — e.g. "this feature isn't available yet".
+  /// Shows info.
   static void showInfo(BuildContext context, String message) => _show(
     context,
     message: message,
@@ -96,29 +98,15 @@ class AppFeedback {
     icon: Icons.info_outline,
   );
 
-  /// Public entry point for turning any thrown error (or a raw string
-  /// already sitting in a screen's `_error` field) into UI-safe text —
-  /// used by [showError] and also by [AiraErrorState] so a raw
-  /// backend/DB crash dump never renders on screen, no matter which
-  /// screen catches it.
+  /// Friendly message.
   static String friendlyMessage(Object error, {String? fallback}) =>
       _cleanError(error, fallback: fallback);
 
+  /// Clean error.
   static String _cleanError(Object error, {String? fallback}) {
     var raw = error.toString().replaceFirst('Exception: ', '').trim();
-    // Backend sometimes leaks the raw Python exception class name in front
-    // of its message (e.g. "Value Error Updating records is not allowed").
-    // That's an implementation detail, not something a user should see —
-    // strip it before any further matching/display.
     raw = raw.replaceFirst(RegExp(r'^Value ?Error:?\s*', caseSensitive: false), '').trim();
     final e = raw.toLowerCase();
-
-    // A raw server-side crash dump (DB errors, Python dict/serializer
-    // error reprs, stack traces) leaking through a 400/500 — these are
-    // never meant for an end user (they can be hundreds of characters
-    // long and reference internal column/table names). Catch them by
-    // pattern regardless of length, log the real detail for diagnosis,
-    // and show a clean generic message instead.
     const technicalMarkers = [
       'exception error',
       'database error',
@@ -137,70 +125,60 @@ class AppFeedback {
     ];
     if (technicalMarkers.any((m) => e.contains(m))) {
       debugPrint('[AppFeedback] Suppressed technical error from UI: $raw');
-      return fallback ?? "Something went wrong on our end. Please try again in a moment.";
+      return fallback ?? "Sunndari Server Had A Problem. Please Try Again In A Few Minutes.";
     }
 
-    // Known backend business-rule messages that are technically accurate
-    // but not user-friendly — map them to something actionable instead of
-    // showing the backend's internal wording verbatim.
     if (e.contains('updating records is not allowed')) {
-      return "This booking can't be updated right now. Please try again in a moment, or contact support if it keeps happening.";
+      return "This Booking Can't Be Updated Right Now. Please Try Again In A Moment, Or Contact Support If It Keeps Happening.";
     }
 
     if (e.contains('timeout')) {
-      return "The server is taking longer than expected. Please try again in a moment.";
+      return "The Server Is Slow To Respond. Please Check Your Internet And Try Again.";
     }
 
     if (e.contains('socket') ||
         e.contains('failed host lookup') ||
         e.contains('connection refused') ||
         e.contains('network')) {
-      return "Unable to connect. Please check your internet connection and try again.";
+      return "No Internet Connection. Please Turn On Mobile Data Or Wi-Fi And Try Again.";
     }
 
     if (e.contains('401') || e.contains('unauthorized')) {
-      return "Your session has expired. Please sign in again.";
+      return "Your Login Has Expired. Please Log In Again.";
     }
 
     if (e.contains('403')) {
-      return "You don't have permission to perform this action.";
+      return "You Don't Have Permission To Perform This Action.";
     }
 
     if (e.contains('404')) {
-      return "The requested information could not be found.";
+      return "This Information Was Not Found. It May Have Been Removed.";
     }
 
     if (e.contains('409')) {
-      return "This action cannot be completed because the data already exists.";
+      return "This Action Cannot Be Completed Because The Data Already Exists.";
     }
 
     if (e.contains('422')) {
-      return "Some information is invalid. Please check and try again.";
+      return "Some Details Are Not Valid. Please Check The Highlighted Fields.";
     }
 
     if (e.contains('500') ||
         e.contains('502') ||
         e.contains('503') ||
         e.contains('504')) {
-      return "Our server is currently unavailable. Please try again later.";
+      return "Sunndari Server Is Not Available Right Now. Please Try Again In A Few Minutes.";
     }
 
     if (e.contains('cancel')) {
-      return "The request was cancelled.";
+      return "The Request Was Cancelled.";
     }
 
-    // No known network/HTTP-status pattern matched — this is almost always
-    // a specific, human-readable message the backend sent on purpose (e.g.
-    // "Booking cannot be marked complete before the scheduled date" or
-    // "Invalid status transition from confirmed to completed"). Show it
-    // instead of silently swapping it out for a generic string — that was
-    // hiding the real, actionable reason behind every 400/422-style
-    // business-rule rejection (Mark complete, Cancel, etc.).
     if (raw.isNotEmpty && raw.length <= 200) {
       return raw;
     }
 
     return fallback ??
-        "Something went wrong. Please try again.";
+        "Could Not Complete This. Please Check Your Internet And Try Again.";
   }
 }

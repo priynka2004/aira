@@ -1,7 +1,9 @@
+// FILE: screens/create_post_screen.dart
+// SCREEN: Create Post — pick photo + occasion, generate caption, preview, share (local, no API).
+
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../theme/tokens.dart';
@@ -10,28 +12,27 @@ import '../models/artist/portfolio.dart';
 import '../utils/service_locator.dart';
 import '../utils/media_url.dart';
 import '../utils/app_feedback.dart';
+import '../utils/api_logger.dart';
+import '../utils/share_profile.dart';
 
-/// Landing-page "Create Post" flow: pick a portfolio photo, pick an
-/// occasion + tone, get a ready-to-edit caption with hashtags, preview it
-/// like a real Instagram post, then share it out.
-///
-/// There's no AI copy-generation endpoint in the Sunndari API, so the
-/// caption is built from real template + tag logic (deterministic, not a
-/// model call) rather than faked as "AI-generated" — it's fully editable
-/// before sharing either way.
+/// SCREEN: Create Post — pick photo + occasion, generate caption, preview, share (local, no API).
 class CreatePostScreen extends StatefulWidget {
-  const CreatePostScreen({super.key});
+  /// Which occasion chip starts selected (0 Everyday, 1 Bridal, 2 Festive, 3 Party, 4 New look).
+  final int initialOccasion;
+  const CreatePostScreen({super.key, this.initialOccasion = 0});
 
   @override
   State<CreatePostScreen> createState() => _CreatePostScreenState();
 }
 
+/// Occasion.
 class _Occasion {
   final String label;
   final String emoji;
   const _Occasion(this.label, this.emoji);
 }
 
+/// State of [CreatePostScreen] — holds the screen data and logic.
 class _CreatePostScreenState extends State<CreatePostScreen> {
   bool _loadingPortfolio = true;
   String? _loadError;
@@ -45,26 +46,30 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     _Occasion('Party', '🥂'),
     _Occasion('New Look', '💫'),
   ];
-  static const _tones = ['Warm & friendly', 'Bold & confident', 'Elegant & minimal'];
+  static const _tones = ['Warm & Friendly', 'Bold & Confident', 'Elegant & Minimal'];
 
   int _occasionIndex = 0;
   int _toneIndex = 0;
   final _captionController = TextEditingController();
   bool _sharing = false;
 
+  /// Runs once when the screen opens; starts: _loadPortfolio(), _regenerateCaption().
   @override
   void initState() {
     super.initState();
+    _occasionIndex = widget.initialOccasion.clamp(0, _occasions.length - 1);
     _loadPortfolio();
     _regenerateCaption();
   }
 
+  /// Frees controllers / listeners when the screen closes.
   @override
   void dispose() {
     _captionController.dispose();
     super.dispose();
   }
 
+  /// Loads portfolio.
   Future<void> _loadPortfolio() async {
     try {
       final page = await ServiceLocator.artistService
@@ -86,14 +91,14 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   }
 
   static const _openers = {
-    'Warm & friendly': ['So happy with how this turned out! 🥰', 'Had the sweetest time creating this look 💕'],
-    'Bold & confident': ['Unapologetically glam. 🔥', 'This is what confidence looks like. 💄'],
-    'Elegant & minimal': ['Simple. Elegant. Timeless.', 'Less is more, always. ✨'],
+    'Warm & Friendly': ['So Happy With How This Turned Out! 🥰', 'Had The Sweetest Time Creating This Look 💕'],
+    'Bold & Confident': ['Unapologetically Glam. 🔥', 'This Is What Confidence Looks Like. 💄'],
+    'Elegant & Minimal': ['Simple. Elegant. Timeless.', 'Less Is More, Always. ✨'],
   };
   static const _ctas = [
-    'DM to book your slot!',
-    'Slots filling fast this week — message me to grab yours.',
-    'Tap the link in bio to book.',
+    'DM To Book Your Slot!',
+    'Slots Filling Fast This Week — Message Me To Grab Yours.',
+    'Tap The Link In Bio To Book.',
   ];
   static const _baseTags = ['#SunndariArtist', '#MakeupArtist', '#BeautyLook'];
   static const _occasionTags = {
@@ -104,6 +109,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     'New Look': ['#Transformation', '#NewLook'],
   };
 
+  /// Regenerates caption.
   void _regenerateCaption() {
     final occasion = _occasions[_occasionIndex];
     final tone = _tones[_toneIndex];
@@ -113,22 +119,24 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     _captionController.text = '${occasion.emoji} $opener\n\n$cta\n\n${tags.join(' ')}';
   }
 
+  /// Shares via the share sheet.
   Future<void> _share() async {
     setState(() => _sharing = true);
     try {
+      final text = await captionWithProfileLink(_captionController.text);
       final selected = _selected;
       final url = selected != null ? resolveMediaUrl(selected.fileUrl) : null;
       if (url != null) {
-        final response = await http.get(Uri.parse(url));
-        if (response.statusCode != 200) throw Exception("Couldn't load this photo to share.");
+        final response = await ApiLog.get(Uri.parse(url), tag: 'HTTP/download');
+        if (response.statusCode != 200) throw Exception("Couldn't Load This Photo To Share.");
         final dir = await getTemporaryDirectory();
         final ext = url.contains('.png') ? '.png' : '.jpg';
         final file = File('${dir.path}/post_preview$ext');
         await file.writeAsBytes(response.bodyBytes);
         if (!mounted) return;
-        await Share.shareXFiles([XFile(file.path)], text: _captionController.text);
+        await Share.shareXFiles([XFile(file.path)], text: text);
       } else {
-        await Share.share(_captionController.text);
+        await Share.share(text);
       }
     } catch (e) {
       if (mounted) AppFeedback.showError(context, e);
@@ -137,6 +145,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     }
   }
 
+  /// Builds the UI.
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -146,17 +155,12 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
-              child: Row(
-                children: [
-                  GestureDetector(
-                    onTap: () => Navigator.of(context).pop(),
-                    child: const Icon(Icons.arrow_back, size: 20, color: AiraColors.charcoal),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(child: Text('Create Post', style: AiraText.serif(fontSize: 19, fontWeight: FontWeight.w600))),
-                ],
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: SunndariAppBar(onBack: () => Navigator.of(context).pop()),
+            ),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 0, 20, 0),
+              child: SunndariPageHeading(title: 'Create Post', subtitle: 'Pick A Look, Add A Caption And Share.'),
             ),
             const SizedBox(height: 16),
             Expanded(
@@ -174,7 +178,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                       style: AiraText.sans(fontSize: 12, fontWeight: FontWeight.w600, color: AiraColors.charcoalSoft)),
                   const SizedBox(height: 10),
                   if (_portfolio.isEmpty)
-                    Text('No portfolio items yet — add some from Settings → Portfolio.',
+                    Text('No Portfolio Items Yet — Add Some From Settings → Portfolio.',
                         style: AiraText.sans(fontSize: 13, color: AiraColors.charcoalSoft))
                   else
                     SizedBox(

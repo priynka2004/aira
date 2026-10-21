@@ -1,8 +1,12 @@
+// FILE: screens/learning_screen.dart
+// SCREEN: Learning — course list (static content).
+
 import 'package:flutter/material.dart';
 import '../theme/tokens.dart';
 import '../widgets/common.dart';
 import '../utils/app_feedback.dart';
 
+/// Course.
 class _Course {
   final String title;
   final String level;
@@ -11,9 +15,11 @@ class _Course {
   const _Course(this.title, this.level, this.time, this.icon);
 }
 
+/// SCREEN: Learning — course list (static content).
 class LearningScreen extends StatelessWidget {
   const LearningScreen({super.key});
 
+  /// Builds the UI.
   @override
   Widget build(BuildContext context) {
     const courses = [
@@ -40,7 +46,7 @@ class LearningScreen extends StatelessWidget {
                   children: [
                     Text('RECOMMENDED FOR YOU', style: AiraText.sans(fontSize: 12, fontWeight: FontWeight.w600, color: AiraColors.roseDeep)),
                     const SizedBox(height: 6),
-                    Text('Bridal bookings are rising near you — sharpen your draping skills.',
+                    Text('Courses And Tips For Artists Are Coming Soon.',
                         style: AiraText.serif(fontSize: 18, fontWeight: FontWeight.w600, height: 1.4)),
                   ],
                 ),
@@ -55,7 +61,7 @@ class LearningScreen extends StatelessWidget {
                           padding: const EdgeInsets.only(bottom: 12),
                           child: AiraCard(
                             padding: const EdgeInsets.all(14),
-                            onTap: () => AppFeedback.showInfo(context, '"${c.title}" isn\'t available yet'),
+                            onTap: () => AppFeedback.showInfo(context, 'Courses Are Coming Soon'),
                             child: Row(
                               children: [
                                 Container(

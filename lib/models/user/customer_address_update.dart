@@ -1,3 +1,7 @@
+// FILE: models/user/customer_address_update.dart  |  MODEL
+// Request body to update a customer address.
+
+/// Model: Customer Address Update.
 class CustomerAddressUpdate {
   final int addressId;
   final String? addressLine1;
@@ -15,6 +19,7 @@ class CustomerAddressUpdate {
     this.isDefault,
   });
 
+  /// Converts this object to JSON for the API.
   Map<String, dynamic> toJson() => {
     'address_id': addressId,
     if (addressLine1 != null) 'address_line_1': addressLine1,

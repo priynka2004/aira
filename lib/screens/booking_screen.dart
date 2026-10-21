@@ -1,25 +1,27 @@
+// FILE: screens/booking_screen.dart
+// SCREEN: Bookings tab — list of bookings (Upcoming / Completed / Cancelled) with search and filters.
+
 import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../models/core/status_item.dart';
 import '../theme/tokens.dart';
 import '../widgets/common.dart';
 import '../widgets/journey_action_button.dart';
+import '../utils/service_locator.dart';
+import '../models/booking/booking_reschedule.dart';
 import 'booking_detail_screen.dart';
+import 'business_details_screen.dart';
 
+/// SCREEN: Bookings tab — list of bookings (Upcoming / Completed / Cancelled) with search and filters.
 class BookingScreen extends StatefulWidget {
   final List<BookingSlot> slots;
   final bool loading;
   final void Function(BookingSlot slot, SlotStatus next, {String? reason})? onUpdateStatus;
-  // Passed straight through to [BookingDetailScreen] so it can map a live
-  // Firestore statusId update onto the same [SlotStatus] this list uses —
-  // without it, the detail screen has no way to interpret a raw statusId
-  // it hasn't fetched itself.
   final List<StatusItem> statuses;
-  // Lets the journey flow (on-my-way/arrived/PIN verification) tell the
-  // parent to reload bookings once a step actually changes the backend's
-  // statusId — otherwise the list here would keep showing a stale status
-  // until the next unrelated refresh.
   final VoidCallback? onRefresh;
+
+  /// Switches the main tab (e.g. 'calendar') — used instead of opening a second copy of a tab screen.
+  final void Function(String target, [String? tab])? onNavigate;
 
   const BookingScreen({
     super.key,
@@ -28,43 +30,64 @@ class BookingScreen extends StatefulWidget {
     this.onUpdateStatus,
     this.statuses = const [],
     this.onRefresh,
+    this.onNavigate,
   });
 
   @override
   State<BookingScreen> createState() => _BookingScreenState();
 }
 
+/// State of [BookingScreen] — holds the screen data and logic.
 class _BookingScreenState extends State<BookingScreen> {
   late DateTime _selectedDate;
+  String _tab = 'requests';
+  final _search = TextEditingController();
 
-  /// When set, the screen switches from the single-day week-pill view to a
-  /// grouped list of every booking between these two dates (inclusive) —
-  /// this is how older bookings, outside the current week, get seen.
   DateTimeRange? _customRange;
 
+  /// Iso date.
   static String _isoDate(DateTime d) =>
       '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
+  /// Frees controllers / listeners when the screen closes.
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  /// Runs once when the screen opens; starts: _loadReschedules().
   @override
   void initState() {
     super.initState();
     final now = DateTime.now();
     _selectedDate = DateTime(now.year, now.month, now.day);
+    _loadReschedules();
   }
 
-  /// Today through the next 29 days (30 days total) — the schedule window
-  /// the business/artist screen should default to, per the Booking Status
-  /// rules: today's date is selected on open (see [initState]) and the
-  /// strip itself never reaches into the past. Older bookings are still
-  /// reachable, but only via the explicit date-range picker
-  /// ([AiraDateRangeButton]/[_pickRange]) — they never show here by
-  /// default.
+  Map<int, BookingReschedule> _reschedules = {};
+
+  /// Loads reschedules.
+  /// API: rescheduleService.all
+  Future<void> _loadReschedules() async {
+    final m = await ServiceLocator.rescheduleService.all();
+    if (mounted) setState(() => _reschedules = m);
+  }
+
+  /// Returns true if it has pending reschedule.
+  bool _hasPendingReschedule(BookingSlot s) =>
+      s.bookingId != null &&
+          (_reschedules[s.bookingId]?.isPending ?? false) &&
+          s.status == SlotStatus.confirmed;
+
+  /// Next30 days.
   List<DateTime> get _next30Days {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     return List.generate(30, (i) => today.add(Duration(days: i)));
   }
 
+  /// Slots for selected day.
   List<BookingSlot> get _slotsForSelectedDay {
     final iso = _isoDate(_selectedDate);
     final list = widget.slots.where((s) => s.date == iso).toList();
@@ -72,8 +95,7 @@ class _BookingScreenState extends State<BookingScreen> {
     return list;
   }
 
-  /// Every booking that falls inside [_customRange], grouped by ISO date
-  /// (ascending), each day's slots sorted by time.
+  /// Slots grouped for range.
   List<MapEntry<String, List<BookingSlot>>> get _slotsGroupedForRange {
     final range = _customRange;
     if (range == null) return const [];
@@ -91,8 +113,7 @@ class _BookingScreenState extends State<BookingScreen> {
     return entries;
   }
 
-  /// Real, data-derived clashes for the selected day — pairs of active
-  /// bookings that share the exact same start time.
+  /// Clash descriptions.
   List<String> get _clashDescriptions {
     final active = _slotsForSelectedDay
         .where((s) => s.status != SlotStatus.cancelled && s.status != SlotStatus.noShow && s.status != SlotStatus.completed)
@@ -105,18 +126,20 @@ class _BookingScreenState extends State<BookingScreen> {
     for (final entry in byTime.entries) {
       if (entry.value.length > 1) {
         final who = entry.value.map((s) => s.client).join(' & ');
-        out.add('$who overlap at ${entry.key}');
+        out.add('$who Overlap At ${entry.key}');
       }
     }
     return out;
   }
 
+  /// Lets the user pick range.
   Future<void> _pickRange() async {
     final picked = await pickAiraDateRange(context, initialRange: _customRange);
     if (picked == null) return;
     setState(() => _customRange = picked);
   }
 
+  /// Date header label.
   String _dateHeaderLabel(String iso) {
     final d = DateTime.tryParse(iso);
     if (d == null) return iso;
@@ -125,6 +148,7 @@ class _BookingScreenState extends State<BookingScreen> {
     return '${weekdays[d.weekday - 1]}, ${d.day} ${months[d.month - 1]}';
   }
 
+  /// Status bg.
   Color _statusBg(SlotStatus s) => switch (s) {
     SlotStatus.pending => AiraColors.goldSoft,
     SlotStatus.confirmed => const Color(0xFFEAF3EC),
@@ -135,6 +159,7 @@ class _BookingScreenState extends State<BookingScreen> {
     SlotStatus.cancelled => AiraColors.errorBg,
     SlotStatus.noShow => AiraColors.errorBg,
   };
+  /// Status text.
   Color _statusText(SlotStatus s) => switch (s) {
     SlotStatus.pending => AiraColors.warn,
     SlotStatus.confirmed => AiraColors.success,
@@ -145,55 +170,49 @@ class _BookingScreenState extends State<BookingScreen> {
     SlotStatus.cancelled => AiraColors.errorText,
     SlotStatus.noShow => AiraColors.errorText,
   };
+  /// Status label.
   String _statusLabel(SlotStatus s) => switch (s) {
-    SlotStatus.pending => 'New request',
+    SlotStatus.pending => 'New Request',
     SlotStatus.confirmed => 'Confirmed',
     SlotStatus.completed => 'Completed',
-    SlotStatus.inProgress => 'In progress',
+    SlotStatus.inProgress => 'In Progress',
     SlotStatus.open => 'Open',
     SlotStatus.clash => 'Clash',
     SlotStatus.cancelled => 'Cancelled',
     SlotStatus.noShow => 'No-show',
   };
 
-  /// A slot whose window has fully lapsed (see [BookingSlot.isMissed])
-  /// without ever reaching a terminal status reads as "Missed" — this
-  /// overrides every other label/color below it for pending/confirmed/
-  /// in-progress slots, since the booking date+time (not the stale
-  /// backend statusId) is the source of truth for whether it's still
-  /// live. A `confirmed` slot that hasn't lapsed yet and is on a future
-  /// date reads as "Upcoming" — matches the action button below it, which
-  /// is "Upcoming" (disabled) until the booking day arrives.
+  /// Returns true if missed.
   bool _isMissed(BookingSlot s) =>
       s.isMissed &&
-      (s.status == SlotStatus.pending ||
-          s.status == SlotStatus.confirmed ||
-          s.status == SlotStatus.inProgress);
+          (s.status == SlotStatus.pending ||
+              s.status == SlotStatus.confirmed ||
+              s.status == SlotStatus.inProgress);
 
+  /// Display status label.
   String _displayStatusLabel(BookingSlot s) {
     if (_isMissed(s)) return 'Missed';
+    if (_hasPendingReschedule(s)) {
+      return _reschedules[s.bookingId]!.fromCustomer ? 'Reschedule Request' : 'Reschedule Requested';
+    }
     if (s.status == SlotStatus.confirmed && s.isFutureDate) return 'Upcoming';
     return _statusLabel(s.status);
   }
 
+  /// Display status bg.
   Color _displayStatusBg(BookingSlot s) =>
-      _isMissed(s) ? AiraColors.errorBg : _statusBg(s.status);
+      _isMissed(s) ? AiraColors.errorBg : (_hasPendingReschedule(s) ? AiraColors.goldSoft : _statusBg(s.status));
+  /// Display status text.
   Color _displayStatusText(BookingSlot s) =>
-      _isMissed(s) ? AiraColors.errorText : _statusText(s.status);
+      _isMissed(s) ? AiraColors.errorText : (_hasPendingReschedule(s) ? const Color(0xFF8A6A1F) : _statusText(s.status));
 
+  /// UI piece: slot tile.
   Widget _slotTile(BookingSlot s) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            width: 58,
-            child: Padding(
-              padding: const EdgeInsets.only(top: 13),
-              child: Text(s.time, style: AiraText.sans(fontSize: 12, color: AiraColors.charcoalSoft)),
-            ),
-          ),
           Expanded(
             child: AiraCard(
               padding: const EdgeInsets.all(13),
@@ -208,7 +227,7 @@ class _BookingScreenState extends State<BookingScreen> {
                   statuses: widget.statuses,
                   onRefresh: widget.onRefresh,
                 ),
-              )),
+              )).then((_) => _loadReschedules()),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -219,8 +238,11 @@ class _BookingScreenState extends State<BookingScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
+                            Text('${s.bookingId != null ? 'Booking #${s.bookingId} • ' : ''}${_dateHeaderLabel(s.date)} • ${s.time}',
+                                style: AiraText.sans(fontSize: 11.5, color: AiraColors.charcoalSoft)),
+                            const SizedBox(height: 2),
                             Text(s.client == '—' ? s.service : s.client,
-                                style: AiraText.sans(fontSize: 13.5, fontWeight: FontWeight.w600)),
+                                style: AiraText.sans(fontSize: 14, fontWeight: FontWeight.w700, color: AiraColors.roseDeep)),
                             if (s.client != '—')
                               Text(s.service, style: AiraText.sans(fontSize: 12, color: AiraColors.charcoalSoft)),
                             if (s.amount != null)
@@ -237,10 +259,6 @@ class _BookingScreenState extends State<BookingScreen> {
                       ),
                     ],
                   ),
-                  // A missed slot never offers Accept/Reject/On My Way/etc
-                  // — its window is gone. The only remaining action is
-                  // Cancel, so it needs to stay reachable here rather than
-                  // disappearing along with the rest of the row.
                   if (widget.onUpdateStatus != null &&
                       s.bookingId != null &&
                       (s.status == SlotStatus.pending ||
@@ -256,7 +274,7 @@ class _BookingScreenState extends State<BookingScreen> {
                             color: AiraColors.errorText,
                             onTap: () async {
                               final reason = await showAiraCancelReasonDialog(context, clientName: s.client);
-                              if (reason == null) return; // artist backed out
+                              if (reason == null) return;
                               widget.onUpdateStatus!(s, SlotStatus.cancelled, reason: reason);
                             },
                           ),
@@ -277,7 +295,7 @@ class _BookingScreenState extends State<BookingScreen> {
                             color: AiraColors.errorText,
                             onTap: () async {
                               final reason = await showAiraCancelReasonDialog(context, clientName: s.client, isReject: true);
-                              if (reason == null) return; // artist backed out
+                              if (reason == null) return;
                               widget.onUpdateStatus!(s, SlotStatus.cancelled, reason: reason);
                             },
                           ),
@@ -286,13 +304,6 @@ class _BookingScreenState extends State<BookingScreen> {
                     else
                       Row(
                         children: [
-                          // Dynamic button driven by the booking's own
-                          // live state: Upcoming → On My Way → Confirm
-                          // Arrival → Start Service (enter customer's
-                          // PIN) → Enter Completion Code → Completed. See
-                          // widgets/journey_action_button.dart — "Mark
-                          // complete" is no longer directly reachable from
-                          // here, it only happens at the end of that flow.
                           JourneyActionButton(
                             slot: s,
                             statuses: widget.statuses,
@@ -306,7 +317,7 @@ class _BookingScreenState extends State<BookingScreen> {
                             color: AiraColors.errorText,
                             onTap: () async {
                               final reason = await showAiraCancelReasonDialog(context, clientName: s.client);
-                              if (reason == null) return; // artist backed out
+                              if (reason == null) return;
                               widget.onUpdateStatus!(s, SlotStatus.cancelled, reason: reason);
                             },
                           ),
@@ -322,141 +333,242 @@ class _BookingScreenState extends State<BookingScreen> {
     );
   }
 
+  /// In range.
+  bool _inRange(BookingSlot s) {
+    final r = _customRange;
+    if (r == null) return true;
+    return s.date.compareTo(_isoDate(r.start)) >= 0 && s.date.compareTo(_isoDate(r.end)) <= 0;
+  }
+
+  /// Matches search.
+  bool _matchesSearch(BookingSlot s) {
+    final q = _search.text.trim().toLowerCase();
+    if (q.isEmpty) return true;
+    return s.client.toLowerCase().contains(q) ||
+        s.service.toLowerCase().contains(q) ||
+        '${s.bookingId ?? ''}'.contains(q);
+  }
+
+  /// Returns true if request.
+  bool _isRequest(BookingSlot s) => s.status == SlotStatus.pending && !_isMissed(s);
+  /// Returns true if upcoming.
+  bool _isUpcoming(BookingSlot s) =>
+      (s.status == SlotStatus.confirmed || s.status == SlotStatus.inProgress) && !_isMissed(s);
+  /// Returns true if completed.
+  bool _isCompleted(BookingSlot s) => s.status == SlotStatus.completed;
+
+  /// For tab.
+  List<BookingSlot> _forTab(String tab) {
+    final list = widget.slots
+        .where((s) => s.bookingId != null)
+        .where(switch (tab) {
+      'upcoming' => _isUpcoming,
+      'completed' => _isCompleted,
+      _ => _isRequest,
+    })
+        .where(_inRange)
+        .where(_matchesSearch)
+        .toList();
+    list.sort((a, b) {
+      final c = a.date.compareTo(b.date);
+      return tab == 'completed' ? -c : (c != 0 ? c : a.time.compareTo(b.time));
+    });
+    return list;
+  }
+
+  /// UI piece: tab pill.
+  Widget _tabPill(String key, String label, int count) {
+    final on = _tab == key;
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => setState(() => _tab = key),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 11),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: on ? AiraColors.roseDeep : Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: on ? AiraColors.roseDeep : AiraColors.hair),
+          ),
+          child: Text('$label ($count)',
+              style: AiraText.sans(fontSize: 12, fontWeight: FontWeight.w700, color: on ? Colors.white : AiraColors.charcoal)),
+        ),
+      ),
+    );
+  }
+
+  /// UI piece: ready row.
+  Widget _readyRow(IconData icon, String title, String sub, VoidCallback onTap) => Padding(
+    padding: const EdgeInsets.only(bottom: 10),
+    child: AiraCard(
+      onTap: onTap,
+      padding: const EdgeInsets.all(12),
+      child: Row(
+        children: [
+          SunndariIconBubble(icon: icon, size: 44),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: AiraText.sans(fontSize: 13.5, fontWeight: FontWeight.w800, color: AiraColors.roseDeep)),
+                Text(sub, style: AiraText.sans(fontSize: 12, color: AiraColors.charcoalSoft)),
+              ],
+            ),
+          ),
+          const Icon(Icons.chevron_right_rounded, color: AiraColors.rose),
+        ],
+      ),
+    ),
+  );
+
+  /// UI piece: empty card.
+  Widget _emptyCard(String tab) {
+    final (title, body) = switch (tab) {
+      'upcoming' => ('No Upcoming Bookings', 'Accepted Bookings Will Show Up Here.'),
+      'completed' => ('No Completed Bookings Yet', 'Finished Appointments Will Be Listed Here.'),
+      _ => ('No Booking Requests Yet', 'New Requests Will Appear Here When A Client Books Your Services.'),
+    };
+    final searching = _search.text.trim().isNotEmpty || _customRange != null;
+    return AiraCard(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 26),
+      child: Column(
+        children: [
+          Container(
+            width: 84,
+            height: 84,
+            decoration: const BoxDecoration(color: AiraColors.blush, shape: BoxShape.circle),
+            child: const Icon(Icons.calendar_month_outlined, size: 38, color: AiraColors.rose),
+          ),
+          const SizedBox(height: 14),
+          Text(searching ? 'No Bookings Match' : title,
+              textAlign: TextAlign.center,
+              style: AiraText.sans(fontSize: 16, fontWeight: FontWeight.w800, color: AiraColors.roseDeep)),
+          const SizedBox(height: 6),
+          Text(searching ? 'Try A Different Search Or Date Range.' : body,
+              textAlign: TextAlign.center,
+              style: AiraText.sans(fontSize: 12.5, color: AiraColors.charcoalSoft, height: 1.4)),
+        ],
+      ),
+    );
+  }
+
+  /// Builds the UI.
   @override
   Widget build(BuildContext context) {
-    final rangeMode = _customRange != null;
-    final daySlots = _slotsForSelectedDay;
-    final groupedRange = _slotsGroupedForRange;
-    final clashes = rangeMode ? const <String>[] : _clashDescriptions;
-    final today = DateTime.now();
-    final isToday = _isoDate(_selectedDate) == _isoDate(DateTime(today.year, today.month, today.day));
+    final requests = widget.slots.where((s) => s.bookingId != null && _isRequest(s)).length;
+    final upcoming = widget.slots.where((s) => s.bookingId != null && _isUpcoming(s)).length;
+    final completed = widget.slots.where((s) => s.bookingId != null && _isCompleted(s)).length;
+    final list = _forTab(_tab);
 
     return ListView(
-      padding: const EdgeInsets.only(bottom: 24),
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
       children: [
         if (widget.loading)
           const Padding(
-            padding: EdgeInsets.symmetric(vertical: 40),
+            padding: EdgeInsets.symmetric(vertical: 24),
             child: Center(child: CircularProgressIndicator(strokeWidth: 2.4, color: AiraColors.rose)),
           ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
+        AiraCard(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           child: Row(
             children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: const BoxDecoration(color: AiraColors.blush, shape: BoxShape.circle),
+                child: const Icon(Icons.search_rounded, color: AiraColors.roseDeep, size: 20),
+              ),
+              const SizedBox(width: 10),
               Expanded(
-                child: rangeMode
-                    ? Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    '${groupedRange.fold<int>(0, (n, e) => n + e.value.length)} booking'
-                        '${groupedRange.fold<int>(0, (n, e) => n + e.value.length) == 1 ? '' : 's'} in range',
-                    style: AiraText.sans(fontSize: 12.5, color: AiraColors.charcoalSoft),
-                  ),
-                )
-                    : SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: _next30Days.map((d) {
-                      const labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-                      final label = '${labels[d.weekday - 1]} ${d.day}';
-                      final active = _isoDate(d) == _isoDate(_selectedDate);
-                      return Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: AiraPill(
-                          label: label,
-                          active: active,
-                          onTap: () => setState(() => _selectedDate = d),
-                        ),
-                      );
-                    }).toList(),
+                child: TextField(
+                  controller: _search,
+                  onChanged: (_) => setState(() {}),
+                  cursorColor: AiraColors.roseDeep,
+                  style: AiraText.sans(fontSize: 14),
+                  decoration: InputDecoration(
+                    border: InputBorder.none,
+                    isDense: true,
+                    hintText: 'Search Bookings',
+                    hintStyle: AiraText.sans(fontSize: 14, color: AiraColors.charcoalSoft.withOpacity(0.8)),
                   ),
                 ),
               ),
-              const SizedBox(width: 8),
-              AiraDateRangeButton(
-                range: _customRange,
-                onTap: _pickRange,
-                onClear: () => setState(() => _customRange = null),
-              ),
+              if (_search.text.isNotEmpty)
+                GestureDetector(
+                  onTap: () => setState(_search.clear),
+                  child: const Icon(Icons.close_rounded, size: 18, color: AiraColors.charcoalSoft),
+                ),
             ],
           ),
         ),
-        const SizedBox(height: 16),
-        if (!widget.loading && !rangeMode && clashes.isNotEmpty)
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            _tabPill('requests', 'Requests', requests),
+            const SizedBox(width: 8),
+            _tabPill('upcoming', 'Upcoming', upcoming),
+            const SizedBox(width: 8),
+            _tabPill('completed', 'Completed', completed),
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: _customRange == null ? _pickRange : () => setState(() => _customRange = null),
+              child: Container(
+                width: 44,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: _customRange == null ? Colors.white : AiraColors.blush,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: _customRange == null ? AiraColors.hair : AiraColors.rose),
+                ),
+                child: Icon(_customRange == null ? Icons.tune_rounded : Icons.close_rounded, size: 20, color: AiraColors.roseDeep),
+              ),
+            ),
+          ],
+        ),
+        if (_customRange != null)
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: AiraCard(
-              padding: const EdgeInsets.all(14),
-              borderColor: AiraColors.gold,
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+            padding: const EdgeInsets.only(top: 8),
+            child: Text('Showing ${formatAiraDateRange(_customRange!)}',
+                style: AiraText.sans(fontSize: 12, color: AiraColors.charcoalSoft)),
+          ),
+        const SizedBox(height: 14),
+        if (!widget.loading && list.isEmpty) _emptyCard(_tab),
+        if (list.isNotEmpty) ...list.map(_slotTile),
+        const SizedBox(height: 14),
+        AiraCard(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
                 children: [
-                  const Padding(
-                    padding: EdgeInsets.only(top: 2),
-                    child: Icon(Icons.warning_amber_rounded, size: 16, color: AiraColors.gold),
-                  ),
+                  const Icon(Icons.auto_awesome, size: 34, color: AiraColors.rose),
                   const SizedBox(width: 12),
                   Expanded(
-                    child: Text(
-                      clashes.length == 1
-                          ? '${clashes.first}. Reach out to one client to reschedule.'
-                          : '${clashes.length} time slots have overlapping bookings on this day — review and reschedule as needed.',
-                      style: AiraText.sans(fontSize: 13, height: 1.5),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Stay Ready For Your Next Client',
+                            style: AiraText.sans(fontSize: 15, fontWeight: FontWeight.w800, color: AiraColors.roseDeep)),
+                        Text('Keep Your Profile And Services Up To Date To Attract More Bookings.',
+                            style: AiraText.sans(fontSize: 12, color: AiraColors.charcoalSoft, height: 1.35)),
+                      ],
                     ),
                   ),
                 ],
               ),
-            ),
+              const SizedBox(height: 12),
+              _readyRow(Icons.calendar_month_outlined, 'Keep Your Calendar Updated', 'Make Sure Your Availability Is Correct.',
+                  // Switches to the Calendar tab (no second copy of the screen)
+                      () => widget.onNavigate?.call('calendar')),
+              _readyRow(Icons.receipt_long_outlined, 'Review Your Services & Pricing', 'Keep Your Offerings Fresh And Clear.',
+                  // Navigates to BusinessDetailsScreen
+                      () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const BusinessDetailsScreen(initialTab: 'package')))),
+            ],
           ),
-        if (!widget.loading && !rangeMode && clashes.isNotEmpty) const SizedBox(height: 14),
-        if (!widget.loading && !rangeMode && daySlots.isEmpty)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
-            child: Text(
-              isToday
-                  ? 'No bookings today — new bookings from clients will show up here.'
-                  : 'No bookings on this day.',
-              style: AiraText.sans(fontSize: 13.5, color: AiraColors.charcoalSoft),
-            ),
-          ),
-        if (!widget.loading && rangeMode && groupedRange.isEmpty)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
-            child: Text(
-              'No bookings between ${formatAiraDateRange(_customRange!)}.',
-              style: AiraText.sans(fontSize: 13.5, color: AiraColors.charcoalSoft),
-            ),
-          ),
-        if (!rangeMode)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: Column(children: daySlots.map(_slotTile).toList()),
-          )
-        else
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: groupedRange.map((entry) {
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 8, top: 4),
-                        child: Text(
-                          _dateHeaderLabel(entry.key),
-                          style: AiraText.sans(fontSize: 12, fontWeight: FontWeight.w600, color: AiraColors.charcoalSoft),
-                        ),
-                      ),
-                      ...entry.value.map(_slotTile),
-                    ],
-                  ),
-                );
-              }).toList(),
-            ),
-          ),
+        ),
       ],
     );
   }

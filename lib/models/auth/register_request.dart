@@ -1,5 +1,9 @@
+// FILE: models/auth/register_request.dart  |  MODEL
+// Request body: register a new artist.
+
 import '../enums/role_enum.dart';
 
+/// Model: Register Request.
 class RegisterRequest {
   final String name;
   final String? email;
@@ -15,10 +19,11 @@ class RegisterRequest {
     required this.role,
   });
 
+  /// Converts this object to JSON for the API.
   Map<String, dynamic> toJson() => {
     'name': name,
-    'email': email,
-    'phone_number': phoneNumber,
+    if (email != null && email!.trim().isNotEmpty) 'email': email!.trim(),
+    if (phoneNumber != null && phoneNumber!.trim().isNotEmpty) 'phone_number': phoneNumber!.trim(),
     'password': password,
     'role': role.toJson(),
   };

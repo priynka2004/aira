@@ -1,3 +1,7 @@
+// FILE: utils/paginated_response.dart
+// Generic wrapper for paginated list responses.
+
+/// Paginated Response.
 class PaginatedResponse<T> {
   final List<T> data;
   final int presentPage;
@@ -9,6 +13,7 @@ class PaginatedResponse<T> {
     required this.totalPage,
   });
 
+  /// Builds this object from API JSON.
   factory PaginatedResponse.fromJson(
       Map<String, dynamic> json,
       T Function(Map<String, dynamic>) fromJson,

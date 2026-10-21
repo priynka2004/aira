@@ -1,3 +1,7 @@
+// FILE: models/core/service_category.dart  |  MODEL
+// Master data: service category.
+
+/// Model: Service Category.
 class ServiceCategory {
   final int categoryId;
   final String name;
@@ -15,6 +19,7 @@ class ServiceCategory {
     required this.updatedAt,
   });
 
+  /// Builds this object from API JSON.
   factory ServiceCategory.fromJson(Map<String, dynamic> json) => ServiceCategory(
     categoryId: json['categoryId'],
     name: json['name'],

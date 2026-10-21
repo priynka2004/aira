@@ -1,3 +1,6 @@
+// FILE: api/core_service.dart
+// Core/master-data APIs: approval / booking / payment statuses, location types, service categories + sub-categories.
+
 import 'dart:convert';
 import 'api_endpoints.dart';
 import 'api_service.dart';
@@ -8,11 +11,14 @@ import '../models/core/location_type.dart';
 import '../models/core/service_category.dart';
 import '../models/core/service_sub_category.dart';
 
+/// Core Service — API/data layer.
 class CoreService {
   final ApiService _apiService;
 
   CoreService(this._apiService);
 
+  /// Gets approval statuses.
+  /// API: GET /core/approval-status/get_all/
   Future<List<StatusItem>> getApprovalStatuses() async {
     final response = await _apiService.get(
       ApiEndpoints.coreApprovalStatusGetAll,
@@ -21,6 +27,8 @@ class CoreService {
     return _parseStatusList(jsonData);
   }
 
+  /// Gets booking statuses.
+  /// API: GET /core/booking-status/get_all/
   Future<List<StatusItem>> getBookingStatuses() async {
     final response = await _apiService.get(
       ApiEndpoints.coreBookingStatusGetAll,
@@ -29,6 +37,8 @@ class CoreService {
     return _parseStatusList(jsonData);
   }
 
+  /// Gets payment statuses.
+  /// API: GET /core/payment-status/get_all/
   Future<List<StatusItem>> getPaymentStatuses() async {
     final response = await _apiService.get(
       ApiEndpoints.corePaymentStatusGetAll,
@@ -37,10 +47,7 @@ class CoreService {
     return _parseStatusList(jsonData);
   }
 
-  /// Shared, defensive parsing for the three status-list endpoints above.
-  /// Accepts `data`/`results`/`items`, or a bare top-level list, and never
-  /// throws on an unexpected shape — an empty list is far safer than
-  /// taking down the whole dashboard load (see StatusItem.fromJson doc).
+  /// Parses status list.
   List<StatusItem> _parseStatusList(dynamic jsonData) {
     List rawList;
     if (jsonData is List) {
@@ -56,6 +63,8 @@ class CoreService {
         .toList();
   }
 
+  /// Gets location type.
+  /// API: GET /core/location-type/get/
   Future<LocationType> getLocationType(int locationTypeId) async {
     final response = await _apiService.get(
       ApiEndpoints.coreLocationTypeGet,
@@ -65,6 +74,8 @@ class CoreService {
     return ApiResponse.fromJson(jsonData, LocationType.fromJson).data;
   }
 
+  /// Gets all location types.
+  /// API: GET /core/location-type/get_all/
   Future<PaginatedResponse<LocationType>> getAllLocationTypes({
     int limit = 10,
     int? pageNum,
@@ -83,6 +94,8 @@ class CoreService {
     );
   }
 
+  /// Gets service category.
+  /// API: GET /core/service-category/get/
   Future<ServiceCategory> getServiceCategory(int categoryId) async {
     final response = await _apiService.get(
       ApiEndpoints.coreServiceCategoryGet,
@@ -92,6 +105,8 @@ class CoreService {
     return ApiResponse.fromJson(jsonData, ServiceCategory.fromJson).data;
   }
 
+  /// Gets all service categories.
+  /// API: GET /core/service-category/get_all/
   Future<PaginatedResponse<ServiceCategory>> getAllServiceCategories({
     int limit = 10,
     int? pageNum,
@@ -110,6 +125,8 @@ class CoreService {
     );
   }
 
+  /// Gets service sub category.
+  /// API: GET /core/service-sub-category/get/
   Future<ServiceSubCategory> getServiceSubCategory(int subCategoryId) async {
     final response = await _apiService.get(
       ApiEndpoints.coreServiceSubCategoryGet,
@@ -119,10 +136,13 @@ class CoreService {
     return ApiResponse.fromJson(jsonData, ServiceSubCategory.fromJson).data;
   }
 
+  /// Gets all service sub categories.
+  /// API: GET /core/service-sub-category/get_all/
   Future<PaginatedResponse<ServiceSubCategory>> getAllServiceSubCategories({
     int limit = 10,
     int? pageNum,
     int? categoryId,
+    String? categoryName, // e.g. 'Makeup Type' → ?filter_key=categoryName&filter_value=Makeup Type
   }) async {
     final response = await _apiService.get(
       ApiEndpoints.coreServiceSubCategoryGetAll,
@@ -131,6 +151,8 @@ class CoreService {
         if (pageNum != null) 'page_num': pageNum.toString(),
         if (categoryId != null) 'filter_key': 'categoryId',
         if (categoryId != null) 'filter_value': categoryId.toString(),
+        if (categoryId == null && categoryName != null) 'filter_key': 'categoryName',
+        if (categoryId == null && categoryName != null) 'filter_value': categoryName,
       },
     );
     final jsonData = jsonDecode(response.body);

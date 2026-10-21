@@ -1,8 +1,14 @@
+// FILE: widgets/common.dart
+// SHARED WIDGETS used across the app: cards, pills, buttons, headers, backgrounds, bottom nav, app bar.
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../theme/tokens.dart';
 import '../utils/app_feedback.dart';
+import '../utils/notification_badge.dart';
+import '../screens/notifications_screen.dart';
 
-/// Generic rounded card — mirrors the React `<Card>` primitive.
+/// Aira Card widget.
 class AiraCard extends StatelessWidget {
   final Widget child;
   final EdgeInsetsGeometry padding;
@@ -18,15 +24,16 @@ class AiraCard extends StatelessWidget {
     super.key,
     required this.child,
     this.padding = const EdgeInsets.all(16),
-    this.backgroundColor = AiraColors.card,
+    this.backgroundColor = AiraColors.pinkFill,
     this.gradient,
     this.borderColor = AiraColors.hair,
     this.borderWidth = 1,
-    this.borderRadius = const BorderRadius.all(Radius.circular(24)),
+    this.borderRadius = const BorderRadius.all(Radius.circular(18)),
     this.onTap,
     this.clipBehavior = Clip.none,
   });
 
+  /// Builds the UI.
   @override
   Widget build(BuildContext context) {
     final card = Container(
@@ -38,7 +45,7 @@ class AiraCard extends StatelessWidget {
         borderRadius: borderRadius,
         border: Border.all(color: borderColor, width: borderWidth),
         boxShadow: const [
-          BoxShadow(color: Color(0x0F2C2320), blurRadius: 24, offset: Offset(0, 8)),
+          BoxShadow(color: Color(0x14C2185B), blurRadius: 18, offset: Offset(0, 6)),
         ],
       ),
       child: child,
@@ -54,7 +61,7 @@ class AiraCard extends StatelessWidget {
   }
 }
 
-/// Pill-shaped toggle/filter button — mirrors `<Pill>`.
+/// Aira Pill widget.
 class AiraPill extends StatelessWidget {
   final String label;
   final bool active;
@@ -62,24 +69,27 @@ class AiraPill extends StatelessWidget {
 
   const AiraPill({super.key, required this.label, this.active = false, this.onTap});
 
+  /// Builds the UI.
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        alignment: Alignment.center,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
         decoration: BoxDecoration(
-          gradient: active ? AiraGradients.aira : null,
-          color: active ? null : AiraColors.card,
+          gradient: active ? AiraGradients.button : null,
+          color: active ? null : AiraColors.pinkFill,
           borderRadius: BorderRadius.circular(999),
-          border: active ? null : Border.all(color: AiraColors.hair),
+          border: active ? null : Border.all(color: AiraColors.pinkBorder),
         ),
         child: Text(
           label,
+          textAlign: TextAlign.center,
           style: AiraText.sans(
             fontSize: 13,
-            fontWeight: FontWeight.w500,
-            color: active ? Colors.white : AiraColors.charcoal,
+            fontWeight: FontWeight.w600,
+            color: active ? Colors.white : AiraColors.roseDeep,
           ),
         ),
       ),
@@ -87,15 +97,16 @@ class AiraPill extends StatelessWidget {
   }
 }
 
-/// Solid rose call-to-action button — mirrors `<PrimaryBtn>`.
+/// Primary Button widget.
 class PrimaryButton extends StatelessWidget {
   final String label;
   final IconData? icon;
   final bool small;
   final VoidCallback? onTap;
-  final Color background;
+  final Color? background;
   final Color foreground;
   final bool expand;
+  final bool arrow;
 
   const PrimaryButton({
     super.key,
@@ -103,54 +114,78 @@ class PrimaryButton extends StatelessWidget {
     this.icon,
     this.small = false,
     this.onTap,
-    this.background = AiraColors.rose,
+    this.background,
     this.foreground = Colors.white,
     this.expand = false,
+    this.arrow = false,
   });
 
+  /// Builds the UI.
   @override
   Widget build(BuildContext context) {
+    final disabled = onTap == null;
     final child = Row(
       mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min,
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
         if (icon != null) ...[
-          Icon(icon, size: small ? 15 : 17, color: foreground),
+          Icon(icon, size: small ? 15 : 18, color: foreground),
           const SizedBox(width: 8),
         ],
-        Text(
-          label,
-          style: AiraText.sans(
-            fontSize: small ? 13 : 15,
-            fontWeight: FontWeight.w500,
-            color: foreground,
+        Flexible(
+          child: Text(
+            label,
+            overflow: TextOverflow.ellipsis,
+            style: AiraText.sans(
+              fontSize: small ? 13 : 16,
+              fontWeight: FontWeight.w600,
+              color: foreground,
+            ),
           ),
         ),
+        if (arrow) ...[
+          const SizedBox(width: 8),
+          Icon(Icons.arrow_forward_rounded, size: small ? 15 : 19, color: foreground),
+        ],
       ],
     );
 
-    return Material(
-      color: background,
-      borderRadius: BorderRadius.circular(16),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Padding(
-          padding: EdgeInsets.symmetric(horizontal: small ? 16 : 20, vertical: small ? 10 : 14),
-          child: child,
+    return Opacity(
+      opacity: disabled ? 0.55 : 1,
+      child: Container(
+        decoration: BoxDecoration(
+          gradient: background == null ? AiraGradients.button : null,
+          color: background,
+          borderRadius: BorderRadius.circular(999),
+          boxShadow: const [
+            BoxShadow(color: Color(0x33C2185B), blurRadius: 16, offset: Offset(0, 6)),
+          ],
+        ),
+        child: Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(999),
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(999),
+            child: Padding(
+              padding: EdgeInsets.symmetric(horizontal: small ? 18 : 24, vertical: small ? 10 : 16),
+              child: child,
+            ),
+          ),
         ),
       ),
     );
   }
 }
 
-/// Outlined button — mirrors `<GhostBtn>`.
+/// Ghost Button widget.
 class GhostButton extends StatelessWidget {
   final String label;
   final IconData? icon;
   final bool small;
   final VoidCallback? onTap;
   final Color color;
+  final bool expand;
 
   const GhostButton({
     super.key,
@@ -158,33 +193,38 @@ class GhostButton extends StatelessWidget {
     this.icon,
     this.small = false,
     this.onTap,
-    this.color = AiraColors.charcoal,
+    this.color = AiraColors.roseDeep,
+    this.expand = false,
   });
 
+  /// Builds the UI.
   @override
   Widget build(BuildContext context) {
     return Material(
       color: Colors.transparent,
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: BorderRadius.circular(999),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(999),
         child: Container(
-          padding: EdgeInsets.symmetric(horizontal: small ? 16 : 20, vertical: small ? 10 : 14),
+          width: expand ? double.infinity : null,
+          padding: EdgeInsets.symmetric(horizontal: small ? 16 : 22, vertical: small ? 10 : 14),
           decoration: BoxDecoration(
-            border: Border.all(color: AiraColors.hair),
-            borderRadius: BorderRadius.circular(16),
+            color: AiraColors.pinkFill.withOpacity(0.7),
+            border: Border.all(color: AiraColors.pinkBorder, width: 1.2),
+            borderRadius: BorderRadius.circular(999),
           ),
           child: Row(
-            mainAxisSize: MainAxisSize.min,
+            mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               if (icon != null) ...[
-                Icon(icon, size: small ? 15 : 17, color: color),
+                Icon(icon, size: small ? 12 : 18, color: color),
                 const SizedBox(width: 8),
               ],
               Text(
                 label,
-                style: AiraText.sans(fontSize: small ? 10 : 12, fontWeight: FontWeight.w500, color: color),
+                style: AiraText.sans(fontSize: small ? 11.5 : 14.5, fontWeight: FontWeight.w600, color: color),
               ),
             ],
           ),
@@ -194,13 +234,32 @@ class GhostButton extends StatelessWidget {
   }
 }
 
-/// The glowing gradient sparkle avatar used for AiRA — mirrors `<AiraOrb>`.
+/// Sunndari Logo widget.
+class SunndariLogo extends StatelessWidget {
+  final double width;
+  const SunndariLogo({super.key, this.width = 220});
+
+  /// Builds the UI.
+  @override
+  Widget build(BuildContext context) {
+    return Image.asset(
+      'assets/images/sunndari_logo.png',
+      width: width,
+      fit: BoxFit.contain,
+      errorBuilder: (_, __, ___) => Text('Sunndari',
+          style: AiraText.serif(fontSize: 26, fontWeight: FontWeight.w600)),
+    );
+  }
+}
+
+/// Aira Orb widget.
 class AiraOrb extends StatelessWidget {
   final double size;
   final VoidCallback? onTap;
 
   const AiraOrb({super.key, this.size = 44, this.onTap});
 
+  /// Builds the UI.
   @override
   Widget build(BuildContext context) {
     final orb = Container(
@@ -221,20 +280,15 @@ class AiraOrb extends StatelessWidget {
   }
 }
 
-/// Centered "something went wrong" state with a Retry button — used
-/// wherever a screen's initial data load fails outright.
+/// Aira Error State widget.
 class AiraErrorState extends StatelessWidget {
   final String message;
   final VoidCallback onRetry;
   const AiraErrorState({super.key, required this.message, required this.onRetry});
 
+  /// Builds the UI.
   @override
   Widget build(BuildContext context) {
-    // Every screen in the app just does `catch (e) { _error =
-    // e.toString(); }` and hands that straight to this widget — so this
-    // is the one place that needs to guard against a raw backend/DB
-    // crash dump ending up on screen, regardless of which screen caught
-    // it. See AppFeedback.friendlyMessage for what gets filtered.
     final displayMessage = AppFeedback.friendlyMessage(message);
     return Center(
       child: Padding(
@@ -258,38 +312,497 @@ class AiraErrorState extends StatelessWidget {
   }
 }
 
-/// Screen header with optional back button — mirrors `<ScreenHeader>`.
+/// Aira Screen Header widget.
 class AiraScreenHeader extends StatelessWidget {
   final String title;
   final VoidCallback? onBack;
 
   const AiraScreenHeader({super.key, required this.title, this.onBack});
 
+  /// Builds the UI.
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
       child: Row(
         children: [
-          if (onBack != null) ...[
-            GestureDetector(
-              onTap: onBack,
-              child: const Icon(Icons.arrow_back, size: 20, color: AiraColors.charcoal),
-            ),
-            const SizedBox(width: 12),
+          if (onBack != null || Navigator.of(context).canPop()) ...[
+            SunndariBackChip(onTap: onBack ?? () => Navigator.of(context).maybePop()),
+            const SizedBox(width: 4),
           ],
-          Text(title, style: AiraText.serif(fontSize: 19, fontWeight: FontWeight.w600)),
+          Expanded(child: Text(title, style: AiraText.serif(fontSize: 22))),
         ],
       ),
     );
   }
 }
 
-/// Small floating confirmation snackbar-style toast — mirrors `<Toast>`.
+/// Sunndari Background widget.
+class SunndariBackground extends StatelessWidget {
+  final Widget child;
+  const SunndariBackground({super.key, required this.child});
+
+  /// Builds the UI.
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      height: double.infinity,
+      decoration: const BoxDecoration(gradient: AiraGradients.page),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Positioned(
+            top: -120,
+            left: -90,
+            child: Container(
+              width: 320,
+              height: 320,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  colors: [Colors.white.withOpacity(0.75), Colors.white.withOpacity(0)],
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            bottom: -140,
+            right: -100,
+            child: Container(
+              width: 360,
+              height: 360,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  colors: [AiraColors.rose.withOpacity(0.16), AiraColors.rose.withOpacity(0)],
+                ),
+              ),
+            ),
+          ),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+/// Sunndari Flow Bar widget — centred title with the standard round back chip on the left
+/// and an optional [trailing] action (e.g. Log Out) on the right.
+class SunndariFlowBar extends StatelessWidget {
+  final String title;
+  final VoidCallback? onBack;
+  final Widget? trailing;
+  const SunndariFlowBar({super.key, required this.title, this.onBack, this.trailing});
+
+  /// Builds the UI.
+  @override
+  Widget build(BuildContext context) {
+    // width: infinity → the bar always spans the full row (otherwise the Stack shrinks to the title's
+    // width inside a Column and the back chip ends up next to the title instead of at the left edge).
+    return SizedBox(
+      width: double.infinity,
+      height: 52,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          // Title first, so it can never sit on top of (and swallow taps meant for) the buttons.
+          Padding(
+            padding: EdgeInsets.symmetric(horizontal: trailing != null ? 96 : 56),
+            child: IgnorePointer(
+              child: Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: AiraText.sans(fontSize: 15, color: AiraColors.rose, fontWeight: FontWeight.w500),
+              ),
+            ),
+          ),
+          if (onBack != null)
+            Positioned.fill(child: Align(alignment: Alignment.centerLeft, child: SunndariBackChip(onTap: onBack!))),
+          if (trailing != null)
+            Positioned.fill(child: Align(alignment: Alignment.centerRight, child: trailing!)),
+        ],
+      ),
+    );
+  }
+}
+
+/// Sunndari Title widget.
+class SunndariTitle extends StatelessWidget {
+  final String title;
+  final String? subtitle;
+  final double size;
+  final TextAlign align;
+  const SunndariTitle({
+    super.key,
+    required this.title,
+    this.subtitle,
+    this.size = 34,
+    this.align = TextAlign.center,
+  });
+
+  /// Builds the UI.
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Text(title, textAlign: align, style: AiraText.serif(fontSize: size, height: 1.12)),
+        if (subtitle != null) ...[
+          const SizedBox(height: 8),
+          Text(
+            subtitle!,
+            textAlign: align,
+            style: AiraText.sans(fontSize: 14, color: AiraColors.charcoalSoft, height: 1.45),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+/// Round back button used on every inner screen (same size, same place).
+class SunndariBackChip extends StatelessWidget {
+  final VoidCallback onTap;
+  const SunndariBackChip({super.key, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      // 48x48 touch target around the 40px circle, so it is easy to hit.
+      child: SizedBox(
+        width: 48,
+        height: 48,
+        child: Center(
+          child: Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.9),
+              shape: BoxShape.circle,
+              border: Border.all(color: AiraColors.hair),
+              boxShadow: [BoxShadow(color: AiraColors.rose.withOpacity(0.10), blurRadius: 8, offset: const Offset(0, 2))],
+            ),
+            child: const Icon(Icons.chevron_left_rounded, size: 26, color: AiraColors.roseDeep),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Notification bell (with unread dot) — opens the Notifications screen.
+class SunndariBell extends StatelessWidget {
+  final VoidCallback? onTap;
+  final int unread;
+  const SunndariBell({super.key, this.onTap, this.unread = 0});
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap ??
+            // Navigates to NotificationsScreen
+            () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const NotificationsScreen())),
+        child: Padding(
+          padding: const EdgeInsets.all(8),
+          child: ValueListenableBuilder<bool>(
+            valueListenable: NotificationBadge.instance.hasUnread,
+            builder: (_, hasUnread, __) => Stack(
+              clipBehavior: Clip.none,
+              children: [
+                const Icon(Icons.notifications_none_rounded, size: 30, color: AiraColors.roseDeep),
+                if (unread > 0 || hasUnread)
+                  Positioned(
+                    right: -1,
+                    top: -1,
+                    child: Container(
+                      width: 9,
+                      height: 9,
+                      decoration: const BoxDecoration(color: AiraColors.rose, shape: BoxShape.circle),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      );
+}
+
+/// Header for the main tab pages (Home, Profile, Calendar...): page title on the left and the
+/// notification bell on the SAME row on the right — no separate top bar, so no wasted space.
+class SunndariTabHeader extends StatelessWidget {
+  final String title;
+  final String? subtitle;
+  final VoidCallback? onBell;
+  final int unread;
+
+  /// Use inside a list that already has 20px side padding.
+  final bool flush;
+
+  const SunndariTabHeader({
+    super.key,
+    required this.title,
+    this.subtitle,
+    this.onBell,
+    this.unread = 0,
+    this.flush = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final bell = SunndariBell(onTap: onBell, unread: unread);
+    return Padding(
+      padding: flush ? const EdgeInsets.only(top: 8, bottom: 12) : const EdgeInsets.fromLTRB(20, 8, 12, 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(child: SunndariPageHeading(title: title, subtitle: subtitle)),
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: flush ? Transform.translate(offset: const Offset(8, 0), child: bell) : bell,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Sunndari App Bar — slim top bar for inner pages: just the back button (no logo).
+/// Main tab pages use [SunndariTabHeader] instead.
+class SunndariAppBar extends StatelessWidget {
+  final VoidCallback? onBell;
+  final VoidCallback? onBack;
+  final int unread;
+
+  /// Optional right-side action (e.g. a share icon).
+  final Widget? trailing;
+
+  /// Kept for older callers; the bell only shows when there is no back button.
+  final bool showBell;
+
+  const SunndariAppBar({
+    super.key,
+    this.onBell,
+    this.onBack,
+    this.unread = 0,
+    this.trailing,
+    this.showBell = true,
+  });
+
+  /// Builds the UI.
+  @override
+  Widget build(BuildContext context) {
+    final right = trailing ?? ((onBack == null && showBell) ? SunndariBell(onTap: onBell, unread: unread) : null);
+    return SizedBox(
+      height: 48,
+      child: Row(
+        children: [
+          if (onBack != null)
+            // +4 so the chip's left edge lines up with the 20px page heading below it.
+            Padding(padding: const EdgeInsets.only(left: 4), child: SunndariBackChip(onTap: onBack!)),
+          const Spacer(),
+          if (right != null) right,
+        ],
+      ),
+    );
+  }
+}
+
+/// Sunndari Page Heading widget.
+class SunndariPageHeading extends StatelessWidget {
+  final String title;
+  final String? subtitle;
+  const SunndariPageHeading({super.key, required this.title, this.subtitle});
+
+  /// Builds the UI.
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title, style: AiraText.serif(fontSize: 30, height: 1.1)),
+        if (subtitle != null) ...[
+          const SizedBox(height: 4),
+          Text(subtitle!, style: AiraText.sans(fontSize: 15, color: AiraColors.charcoalSoft)),
+        ],
+      ],
+    );
+  }
+}
+
+/// Sunndari Field widget.
+class SunndariField extends StatelessWidget {
+  final String label;
+  final TextEditingController controller;
+  final String? hint;
+  final String? optionalTag;
+  final TextInputType? keyboardType;
+  final bool obscure;
+  final Widget? prefix;
+  final Widget? suffix;
+  final int maxLines;
+  final int? maxLength;
+  final ValueChanged<String>? onChanged;
+  final TextInputAction? textInputAction;
+  final ValueChanged<String>? onSubmitted;
+  final List<TextInputFormatter>? formatters;
+  /// null = automatic: first letter capital for normal text; none for email / number / phone / password / URL.
+  final TextCapitalization? capitalization;
+  final bool serifLabel;
+  final String? helper;
+  final bool readOnly;
+  final String? errorText;
+
+  const SunndariField({
+    super.key,
+    required this.label,
+    required this.controller,
+    this.hint,
+    this.optionalTag,
+    this.keyboardType,
+    this.obscure = false,
+    this.prefix,
+    this.suffix,
+    this.maxLines = 1,
+    this.maxLength,
+    this.onChanged,
+    this.textInputAction,
+    this.onSubmitted,
+    this.formatters,
+    this.capitalization,
+    this.serifLabel = true,
+    this.helper,
+    this.readOnly = false,
+    this.errorText,
+  });
+
+  /// Fixed-format inputs must never be auto-capitalised.
+  TextCapitalization _resolveCapitalization() {
+    if (capitalization != null) return capitalization!;
+    if (obscure) return TextCapitalization.none;
+    final t = keyboardType;
+    if (t == TextInputType.emailAddress ||
+        t == TextInputType.number ||
+        t == TextInputType.phone ||
+        t == TextInputType.url ||
+        t == TextInputType.visiblePassword ||
+        t == TextInputType.datetime) {
+      return TextCapitalization.none;
+    }
+    return TextCapitalization.sentences;
+  }
+
+  /// Builds the UI.
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (label.isNotEmpty) ...[
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.baseline,
+              textBaseline: TextBaseline.alphabetic,
+              children: [
+                Text(label,
+                    style: serifLabel
+                        ? AiraText.serif(fontSize: 15.5, fontWeight: FontWeight.w700)
+                        : AiraText.sans(fontSize: 13.5, fontWeight: FontWeight.w700, color: AiraColors.roseDeep)),
+                if (optionalTag != null) ...[
+                  const SizedBox(width: 8),
+                  Text(optionalTag!, style: AiraText.sans(fontSize: 11.5, color: AiraColors.charcoalSoft)),
+                ],
+              ],
+            ),
+            const SizedBox(height: 8),
+          ],
+          Container(
+            decoration: BoxDecoration(
+              color: readOnly ? AiraColors.blush.withOpacity(0.55) : AiraColors.pinkFill,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                  color: errorText != null ? AiraColors.errorText : AiraColors.pinkBorder, width: 1.1),
+            ),
+            child: Row(
+              crossAxisAlignment: maxLines > 1 ? CrossAxisAlignment.start : CrossAxisAlignment.center,
+              children: [
+                if (prefix != null) prefix!,
+                Expanded(
+                  child: TextField(
+                    controller: controller,
+                    keyboardType: keyboardType,
+                    obscureText: obscure,
+                    maxLines: obscure ? 1 : maxLines,
+                    maxLength: maxLength,
+                    onChanged: onChanged,
+                    textInputAction: textInputAction,
+                    onSubmitted: onSubmitted,
+                    inputFormatters: formatters,
+                    textCapitalization: _resolveCapitalization(),
+                    readOnly: readOnly,
+                    enableInteractiveSelection: !readOnly,
+                    cursorColor: AiraColors.roseDeep,
+                    style: AiraText.sans(fontSize: 14.5, color: readOnly ? AiraColors.charcoalSoft : AiraColors.charcoal),
+                    decoration: InputDecoration(
+                      border: InputBorder.none,
+                      counterText: '',
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                      hintText: hint,
+                      hintStyle: AiraText.sans(fontSize: 14, color: AiraColors.charcoalSoft.withOpacity(0.7)),
+                    ),
+                  ),
+                ),
+                if (suffix != null)
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+                    child: Align(alignment: Alignment.center, widthFactor: 1, heightFactor: 1, child: suffix!),
+                  ),
+              ],
+            ),
+          ),
+          if (errorText != null) ...[
+            const SizedBox(height: 5),
+            Text(errorText!, style: AiraText.sans(fontSize: 11.5, color: AiraColors.errorText)),
+          ],
+          if (helper != null) ...[
+            const SizedBox(height: 5),
+            Text(helper!, style: AiraText.sans(fontSize: 11.5, color: AiraColors.charcoalSoft)),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Sunndari Icon Bubble widget.
+class SunndariIconBubble extends StatelessWidget {
+  final IconData icon;
+  final double size;
+  const SunndariIconBubble({super.key, required this.icon, this.size = 44});
+
+  /// Builds the UI.
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: const BoxDecoration(color: AiraColors.blush, shape: BoxShape.circle),
+      child: Icon(icon, size: size * 0.48, color: AiraColors.roseDeep),
+    );
+  }
+}
+
+/// Aira Toast widget.
 class AiraToast extends StatelessWidget {
   final String text;
   const AiraToast({super.key, required this.text});
 
+  /// Builds the UI.
   @override
   Widget build(BuildContext context) {
     return Positioned(
@@ -323,6 +836,7 @@ class AiraToast extends StatelessWidget {
   }
 }
 
+/// Nav Item Data.
 class NavItemData {
   final IconData icon;
   final String label;
@@ -331,49 +845,52 @@ class NavItemData {
 }
 
 const kNavItems = [
-  NavItemData(icon: Icons.wb_sunny_outlined, label: 'Home', key: 'home'),
-  NavItemData(icon: Icons.trending_up, label: 'Business', key: 'business'),
-  NavItemData(icon: Icons.auto_awesome, label: 'Grow', key: 'grow'),
-  NavItemData(icon: Icons.school_outlined, label: 'Learn', key: 'learn'),
-  NavItemData(icon: Icons.person_outline, label: 'Profile', key: 'profile'),
+  NavItemData(icon: Icons.home_outlined, label: 'Home', key: 'home'),
+  NavItemData(icon: Icons.calendar_today_outlined, label: 'Bookings', key: 'bookings'),
+  NavItemData(icon: Icons.event_note_outlined, label: 'Calendar', key: 'calendar'),
+  NavItemData(icon: Icons.bar_chart_rounded, label: 'Earnings', key: 'earnings'),
+  NavItemData(icon: Icons.person_outline_rounded, label: 'Profile', key: 'profile'),
 ];
 
-/// Bottom navigation bar — mirrors `<BottomNav>`.
+/// Aira Bottom Nav widget.
 class AiraBottomNav extends StatelessWidget {
   final String active;
   final ValueChanged<String> onSelect;
 
   const AiraBottomNav({super.key, required this.active, required this.onSelect});
 
+  /// Builds the UI.
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-      decoration: const BoxDecoration(
-        color: AiraColors.card,
-        border: Border(top: BorderSide(color: AiraColors.hair)),
+      padding: const EdgeInsets.fromLTRB(8, 10, 8, 10),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.96),
+        border: const Border(top: BorderSide(color: AiraColors.hair)),
+        boxShadow: const [BoxShadow(color: Color(0x14C2185B), blurRadius: 14, offset: Offset(0, -4))],
       ),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: kNavItems.map((item) {
           final isActive = active == item.key;
-          return GestureDetector(
-            onTap: () => onSelect(item.key),
-            behavior: HitTestBehavior.opaque,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(item.icon, size: 20, color: isActive ? AiraColors.rose : AiraColors.charcoalSoft),
-                const SizedBox(height: 4),
-                Text(
-                  item.label,
-                  style: AiraText.sans(
-                    fontSize: 10,
-                    color: isActive ? AiraColors.rose : AiraColors.charcoalSoft,
-                    fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
+          return Expanded(
+            child: GestureDetector(
+              onTap: () => onSelect(item.key),
+              behavior: HitTestBehavior.opaque,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(item.icon, size: 22, color: isActive ? AiraColors.rose : AiraColors.charcoalSoft),
+                  const SizedBox(height: 4),
+                  Text(
+                    item.label,
+                    style: AiraText.sans(
+                      fontSize: 10.5,
+                      color: isActive ? AiraColors.rose : AiraColors.charcoalSoft,
+                      fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           );
         }).toList(),
@@ -382,8 +899,7 @@ class AiraBottomNav extends StatelessWidget {
   }
 }
 
-/// Formats a [DateTimeRange] as a compact human label, e.g. "3 Jan – 9 Jan",
-/// or "28 Dec 2025 – 3 Jan 2026" when the range spans a year boundary.
+/// Formats aira date range.
 String formatAiraDateRange(DateTimeRange range) {
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   String short(DateTime d) => '${d.day} ${months[d.month - 1]}';
@@ -394,9 +910,7 @@ String formatAiraDateRange(DateTimeRange range) {
   return '${short(range.start)} – ${short(range.end)}';
 }
 
-/// Opens a date-range picker themed to match the AiRA palette. Defaults to
-/// letting people reach back up to 3 years, so past bookings/earnings are
-/// always reachable — not just the current week.
+/// Lets the user pick aira date range.
 Future<DateTimeRange?> pickAiraDateRange(
     BuildContext context, {
       DateTimeRange? initialRange,
@@ -426,9 +940,7 @@ Future<DateTimeRange?> pickAiraDateRange(
   );
 }
 
-/// Small calendar icon + label chip that opens (and optionally clears) a
-/// date-range filter. Used on Bookings, Finance and Insights so people can
-/// look back at old dates, not just the current week.
+/// Aira Date Range Button widget.
 class AiraDateRangeButton extends StatelessWidget {
   final DateTimeRange? range;
   final VoidCallback onTap;
@@ -440,9 +952,10 @@ class AiraDateRangeButton extends StatelessWidget {
     required this.range,
     required this.onTap,
     this.onClear,
-    this.placeholder = 'Date range',
+    this.placeholder = 'Date Range',
   });
 
+  /// Builds the UI.
   @override
   Widget build(BuildContext context) {
     final active = range != null;
@@ -482,32 +995,20 @@ class AiraDateRangeButton extends StatelessWidget {
   }
 }
 
+/// Seg Tab Item.
 class SegTabItem {
   final String key;
   final String label;
   const SegTabItem(this.key, this.label);
 }
 
-/// Confirmation dialog shown before cancelling a booking. Captures a short
-/// reason (e.g. "Not available on this date") that gets sent to the backend
-/// with the cancel request and surfaced to the customer — previously Cancel
-/// fired the API immediately with no reason at all, so the customer only
-/// ever saw a generic "This booking was cancelled." with no explanation.
-///
-/// Returns the trimmed reason string to proceed with cancellation (may be
-/// empty if the artist skips it), or `null` if the artist backed out and
-/// the booking should NOT be cancelled.
-/// [isReject] switches the copy from "Cancel booking" (an already-confirmed
-/// booking the artist can no longer honour) to "Reject booking" (a
-/// still-`pending` request the artist is declining before ever accepting
-/// it) — same reason-collection flow either way, since both end up as the
-/// booking's `cancellationReason` and both need to tell the customer why.
+/// Shows aira cancel reason dialog.
 Future<String?> showAiraCancelReasonDialog(BuildContext context, {String clientName = '', bool isReject = false}) {
   final controller = TextEditingController();
   const presets = [
-    'Not available on this date',
-    'Not available at this time',
-    'Personal emergency',
+    'Not Available On This Date',
+    'Not Available At This Time',
+    'Personal Emergency',
   ];
   final verb = isReject ? 'Reject' : 'Cancel';
 
@@ -529,8 +1030,8 @@ Future<String?> showAiraCancelReasonDialog(BuildContext context, {String clientN
               children: [
                 Text(
                   isReject
-                      ? "Let the client know why — this is shown to them as the reason you're not available."
-                      : 'Let the client know why — this is shown to them as the cancellation reason.',
+                      ? "Let The Client Know Why — This Is Shown To Them As The Reason You're Not Available."
+                      : 'Let The Client Know Why — This Is Shown To Them As The Cancellation Reason.',
                   style: AiraText.sans(fontSize: 12.5, color: AiraColors.charcoalSoft),
                 ),
                 const SizedBox(height: 12),
@@ -558,7 +1059,7 @@ Future<String?> showAiraCancelReasonDialog(BuildContext context, {String clientN
                   maxLines: 2,
                   style: AiraText.sans(fontSize: 13.5),
                   decoration: InputDecoration(
-                    hintText: isReject ? 'Reason for declining (optional)' : 'Reason for cancelling (optional)',
+                    hintText: isReject ? 'Reason For Declining (Optional)' : 'Reason For Cancelling (Optional)',
                     hintStyle: AiraText.sans(fontSize: 13, color: AiraColors.charcoalSoft),
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                     contentPadding: const EdgeInsets.all(10),
@@ -569,7 +1070,7 @@ Future<String?> showAiraCancelReasonDialog(BuildContext context, {String clientN
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(dialogContext).pop(),
-                child: Text(isReject ? 'Keep request' : 'Keep booking',
+                child: Text(isReject ? 'Keep Request' : 'Keep Booking',
                     style: AiraText.sans(fontSize: 13.5, color: AiraColors.charcoalSoft)),
               ),
               TextButton(
@@ -585,7 +1086,7 @@ Future<String?> showAiraCancelReasonDialog(BuildContext context, {String clientN
   );
 }
 
-/// Horizontal segmented pill-tab row — mirrors `<SegTabs>`.
+/// Aira Seg Tabs widget.
 class AiraSegTabs extends StatelessWidget {
   final List<SegTabItem> tabs;
   final String active;
@@ -593,6 +1094,7 @@ class AiraSegTabs extends StatelessWidget {
 
   const AiraSegTabs({super.key, required this.tabs, required this.active, required this.onSelect});
 
+  /// Builds the UI.
   @override
   Widget build(BuildContext context) {
     return Padding(

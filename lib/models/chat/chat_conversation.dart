@@ -1,11 +1,11 @@
-/// Matches the backend's `Conversation` schema (GET /chat/conversation/get/).
+// FILE: models/chat/chat_conversation.dart  |  MODEL
+// Chat conversation of a booking.
+
+/// Model: Chat Conversation.
 class ChatConversation {
   final int conversationId;
   final int bookingId;
   final String createdAt;
-
-  /// `false` once the appointment is marked completed — the UI should
-  /// disable the message input when this is false.
   final bool isOpen;
 
   const ChatConversation({
@@ -15,6 +15,7 @@ class ChatConversation {
     required this.isOpen,
   });
 
+  /// Builds this object from API JSON.
   factory ChatConversation.fromJson(Map<String, dynamic> json) {
     return ChatConversation(
       conversationId: json['conversationId'] ?? 0,

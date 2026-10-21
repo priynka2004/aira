@@ -1,16 +1,16 @@
+// FILE: screens/auth/splash_screen.dart
+// SCREEN: Splash (first screen).
+// Loads saved session -> if logged in goes to resolvePostAuthScreen(), else LoginScreen.
+
 import 'package:flutter/material.dart';
+import '../../utils/app_feedback.dart';
 import '../../theme/tokens.dart';
 import '../../utils/app_session.dart';
-import '../../utils/service_locator.dart';
-import '../../utils/approval_status.dart';
-import '../../app_shell.dart';
+import '../../widgets/common.dart';
 import 'login_screen.dart';
-import 'registration_status_screen.dart';
+import 'post_login_router.dart';
 
-/// First screen shown on launch. Loads the persisted session, and — if a
-/// token exists — verifies it's still valid by pulling the artist profile
-/// before dropping the user into the app. This mirrors the Sunndari
-/// Artist app's splash → auth-check flow, just re-skinned in AiRA's style.
+/// SCREEN: Splash (first screen).
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
 
@@ -18,23 +18,19 @@ class SplashScreen extends StatefulWidget {
   State<SplashScreen> createState() => _SplashScreenState();
 }
 
+/// State of [SplashScreen] — holds the screen data and logic.
 class _SplashScreenState extends State<SplashScreen> {
+  /// Runs once when the screen opens; starts: _bootstrap().
   @override
   void initState() {
     super.initState();
     _bootstrap();
   }
 
+  /// Splash logic: load session -> not logged in = LoginScreen, else resolvePostAuthScreen().
   Future<void> _bootstrap() async {
     await AppSession.instance.load();
-
-    debugPrint("==================================");
-    debugPrint("Splash Token = ${AppSession.instance.accessToken}");
-    debugPrint("Splash LoggedIn = ${AppSession.instance.isLoggedIn}");
-    debugPrint("==================================");
-
-    await Future.delayed(const Duration(milliseconds: 600));
-
+    await Future.delayed(const Duration(milliseconds: 1400));
     if (!mounted) return;
 
     if (!AppSession.instance.isLoggedIn) {
@@ -42,67 +38,102 @@ class _SplashScreenState extends State<SplashScreen> {
       return;
     }
 
+    await _resolve();
+  }
+
+  String? _error;
+  bool _retrying = false;
+
+  /// Opens the right screen. Only a real "login expired" sends the artist to Login;
+  /// internet / server problems show the reason with a Retry button instead.
+  Future<void> _resolve() async {
+    setState(() {
+      _error = null;
+      _retrying = true;
+    });
     try {
-      final profile = await ServiceLocator.artistService.getProfile();
-
-      debugPrint("Splash Status = ${profile.approvalStatusId}");
-
-      final approved = await isApprovedStatusId(profile.approvalStatusId);
-
-      debugPrint("Splash Approved = $approved");
-
+      final screen = await resolvePostAuthScreen();
       if (!mounted) return;
-
-      if (approved) {
-        debugPrint("Going to AppShell");
-        _goTo(const AiraAppShell());
-      } else {
-        debugPrint("Going to RegistrationStatus");
-        _goTo(
-          RegistrationStatusScreen(
-            approvalStatusId: profile.approvalStatusId,
-          ),
-        );
-      }
+      _goTo(screen);
     } catch (e) {
-      debugPrint("Splash Error = $e");
-      await AppSession.instance.clear();
-
+      debugPrint('Splash Error = $e');
       if (!mounted) return;
-
-      _goTo(const LoginScreen());
+      final raw = e.toString().toLowerCase();
+      final expired = raw.contains('session expired') || raw.contains('401') || raw.contains('unauthorized');
+      if (expired) {
+        await AppSession.instance.clear();
+        if (!mounted) return;
+        _goTo(const LoginScreen());
+        return;
+      }
+      setState(() {
+        _error = AppFeedback.friendlyMessage(e);
+        _retrying = false;
+      });
     }
   }
 
+  /// Goes to to.
   void _goTo(Widget screen) {
     Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => screen));
   }
 
+  /// Builds the UI.
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AiraColors.bg,
-      body: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 84,
-              height: 84,
-              decoration: const BoxDecoration(shape: BoxShape.circle, gradient: AiraGradients.avatarOrb),
-              child: const Icon(Icons.auto_awesome, color: Colors.white, size: 36),
-            ),
-            const SizedBox(height: 20),
-            Text('AiRA', style: AiraText.serif(fontSize: 28, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 4),
-            Text('for Sunndari Artists', style: AiraText.sans(fontSize: 13, color: AiraColors.charcoalSoft)),
-            const SizedBox(height: 28),
-            const SizedBox(
-              width: 22,
-              height: 22,
-              child: CircularProgressIndicator(strokeWidth: 2.4, color: AiraColors.rose),
-            ),
-          ],
+      body: SunndariBackground(
+        child: SafeArea(
+          child: Column(
+            children: [
+              const Spacer(flex: 5),
+              const SunndariLogo(width: 300),
+              const SizedBox(height: 26),
+              if (_error != null) ...[
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 32),
+                  child: Text(_error!,
+                      textAlign: TextAlign.center,
+                      style: AiraText.sans(fontSize: 13.5, color: AiraColors.errorText, height: 1.4)),
+                ),
+                const SizedBox(height: 14),
+                PrimaryButton(label: _retrying ? 'Trying…' : 'Try Again', small: true, onTap: _retrying ? null : _resolve),
+                TextButton(
+                  onPressed: () async {
+                    await AppSession.instance.clear();
+                    if (mounted) _goTo(const LoginScreen());
+                  },
+                  child: Text('Log In Again', style: AiraText.sans(fontSize: 13, fontWeight: FontWeight.w700, color: AiraColors.rose)),
+                ),
+              ],
+              if (_error == null)
+                const SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: CircularProgressIndicator(strokeWidth: 2.2, color: AiraColors.rose),
+                ),
+              const Spacer(flex: 4),
+              Text(
+                'Build Your Beauty Business.',
+                style: AiraText.sans(fontSize: 17, color: AiraColors.charcoalSoft),
+              ),
+              const SizedBox(height: 14),
+              Container(
+                width: 56,
+                height: 3.5,
+                decoration: BoxDecoration(
+                  gradient: AiraGradients.button,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const Spacer(flex: 3),
+              Text(
+                'ARA Cosmetech Pvt. Ltd.',
+                style: AiraText.sans(fontSize: 13, color: AiraColors.charcoalSoft),
+              ),
+              const SizedBox(height: 28),
+            ],
+          ),
         ),
       ),
     );

@@ -1,25 +1,21 @@
+// FILE: screens/generate_reel_screen.dart
+// SCREEN: Generate Reel — slideshow preview of portfolio photos + caption, share (local, no API).
+
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
+import '../utils/share_profile.dart';
 import '../theme/tokens.dart';
 import '../widgets/common.dart';
 import '../models/artist/portfolio.dart';
 import '../utils/service_locator.dart';
 import '../utils/media_url.dart';
 import '../utils/app_feedback.dart';
+import '../utils/api_logger.dart';
 
-/// Landing-page "Generate Reel" flow: pick a handful of portfolio photos,
-/// preview them as an auto-advancing slideshow with a caption, then share
-/// the cover photo + caption out.
-///
-/// There's no video-rendering endpoint in the Sunndari API (and stitching
-/// a real .mp4 client-side is out of scope for this app), so "reel" here
-/// means a real, working in-app slideshow preview — not a fake spinner
-/// that produces nothing. Sharing exports the cover image + caption,
-/// which is enough to hand off to Instagram's own Reel composer.
+/// SCREEN: Generate Reel — slideshow preview of portfolio photos + caption, share (local, no API).
 class GenerateReelScreen extends StatefulWidget {
   const GenerateReelScreen({super.key});
 
@@ -27,12 +23,14 @@ class GenerateReelScreen extends StatefulWidget {
   State<GenerateReelScreen> createState() => _GenerateReelScreenState();
 }
 
+/// Vibe.
 class _Vibe {
   final String label;
   final String emoji;
   const _Vibe(this.label, this.emoji);
 }
 
+/// State of [GenerateReelScreen] — holds the screen data and logic.
 class _GenerateReelScreenState extends State<GenerateReelScreen> {
   bool _loading = true;
   String? _loadError;
@@ -40,10 +38,10 @@ class _GenerateReelScreenState extends State<GenerateReelScreen> {
   final Set<int> _selectedIds = {};
 
   static const _vibes = [
-    _Vibe('Glow transformation', '✨'),
-    _Vibe('Behind the scenes', '🎬'),
-    _Vibe('Before & after', '🔁'),
-    _Vibe('Client reactions', '💬'),
+    _Vibe('Glow Transformation', '✨'),
+    _Vibe('Behind The Scenes', '🎬'),
+    _Vibe('Before & After', '🔁'),
+    _Vibe('Client Reactions', '💬'),
   ];
   int _vibeIndex = 0;
   final _captionController = TextEditingController(text: '');
@@ -53,12 +51,14 @@ class _GenerateReelScreenState extends State<GenerateReelScreen> {
   Timer? _previewTimer;
   bool _sharing = false;
 
+  /// Runs once when the screen opens; starts: _load().
   @override
   void initState() {
     super.initState();
     _load();
   }
 
+  /// Frees controllers / listeners when the screen closes.
   @override
   void dispose() {
     _previewTimer?.cancel();
@@ -66,6 +66,7 @@ class _GenerateReelScreenState extends State<GenerateReelScreen> {
     super.dispose();
   }
 
+  /// Loads this screen's data.
   Future<void> _load() async {
     try {
       final page = await ServiceLocator.artistService
@@ -87,10 +88,11 @@ class _GenerateReelScreenState extends State<GenerateReelScreen> {
     }
   }
 
+  /// Updates caption.
   void _updateCaption() {
     final vibe = _vibes[_vibeIndex];
     _captionController.text =
-    '${vibe.emoji} ${vibe.label} ✨\n\nSwipe through the transformation! Book your look with me 💕\n\n#SunndariArtist #ReelIt #MakeupReel';
+    '${vibe.emoji} ${vibe.label} ✨\n\nSwipe Through The Transformation! Book Your Look With Me 💕\n\n#SunndariArtist #ReelIt #MakeupReel';
   }
 
   List<Portfolio> get _selected =>
@@ -103,14 +105,15 @@ class _GenerateReelScreenState extends State<GenerateReelScreen> {
       } else if (_selectedIds.length < 8) {
         _selectedIds.add(portfolioId);
       } else {
-        AppFeedback.showWarning(context, 'Pick up to 8 photos for a reel');
+        AppFeedback.showWarning(context, 'Pick Up To 8 Photos For A Reel');
       }
     });
   }
 
+  /// Starts preview.
   void _startPreview() {
     if (_selected.isEmpty) {
-      AppFeedback.showWarning(context, 'Select at least one photo first');
+      AppFeedback.showWarning(context, 'Select At Least One Photo First');
       return;
     }
     setState(() {
@@ -124,27 +127,30 @@ class _GenerateReelScreenState extends State<GenerateReelScreen> {
     });
   }
 
+  /// Stops preview.
   void _stopPreview() {
     _previewTimer?.cancel();
     setState(() => _previewing = false);
   }
 
+  /// Shares via the share sheet.
   Future<void> _share() async {
     if (_selected.isEmpty) return;
     setState(() => _sharing = true);
     try {
+      final text = await captionWithProfileLink(_captionController.text);
       final url = resolveMediaUrl(_selected.first.fileUrl);
       if (url != null) {
-        final response = await http.get(Uri.parse(url));
-        if (response.statusCode != 200) throw Exception("Couldn't load the cover photo to share.");
+        final response = await ApiLog.get(Uri.parse(url), tag: 'HTTP/download');
+        if (response.statusCode != 200) throw Exception("Couldn't Load The Cover Photo To Share.");
         final dir = await getTemporaryDirectory();
         final ext = url.contains('.png') ? '.png' : '.jpg';
         final file = File('${dir.path}/reel_cover$ext');
         await file.writeAsBytes(response.bodyBytes);
         if (!mounted) return;
-        await Share.shareXFiles([XFile(file.path)], text: _captionController.text);
+        await Share.shareXFiles([XFile(file.path)], text: text);
       } else {
-        await Share.share(_captionController.text);
+        await Share.share(text);
       }
     } catch (e) {
       if (mounted) AppFeedback.showError(context, e);
@@ -153,6 +159,7 @@ class _GenerateReelScreenState extends State<GenerateReelScreen> {
     }
   }
 
+  /// Builds the UI.
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -162,15 +169,14 @@ class _GenerateReelScreenState extends State<GenerateReelScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: SunndariAppBar(onBack: () => Navigator.of(context).pop()),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
               child: Row(
                 children: [
-                  GestureDetector(
-                    onTap: () => Navigator.of(context).pop(),
-                    child: const Icon(Icons.arrow_back, size: 20, color: AiraColors.charcoal),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(child: Text('Generate Reel', style: AiraText.serif(fontSize: 19, fontWeight: FontWeight.w600))),
+                  const Expanded(child: SunndariPageHeading(title: 'Generate Reel', subtitle: 'Turn Your Best Looks Into A Slideshow.')),
                 ],
               ),
             ),
@@ -189,14 +195,14 @@ class _GenerateReelScreenState extends State<GenerateReelScreen> {
                   if (_previewing) ...[
                     _reelPreview(),
                     const SizedBox(height: 12),
-                    GhostButton(label: 'Edit selection', small: false, onTap: _stopPreview),
+                    GhostButton(label: 'Edit Selection', small: false, onTap: _stopPreview),
                     const SizedBox(height: 20),
                   ] else ...[
-                    Text('SELECT PHOTOS (up to 8)',
+                    Text('SELECT PHOTOS (Up To 8)',
                         style: AiraText.sans(fontSize: 12, fontWeight: FontWeight.w600, color: AiraColors.charcoalSoft)),
                     const SizedBox(height: 10),
                     if (_portfolio.isEmpty)
-                      Text('No portfolio items yet — add some from Settings → Portfolio.',
+                      Text('No Portfolio Items Yet — Add Some From Settings → Portfolio.',
                           style: AiraText.sans(fontSize: 13, color: AiraColors.charcoalSoft))
                     else
                       GridView.count(
@@ -273,6 +279,7 @@ class _GenerateReelScreenState extends State<GenerateReelScreen> {
     );
   }
 
+  /// UI piece: reel preview.
   Widget _reelPreview() {
     final selected = _selected;
     final current = selected.isNotEmpty ? selected[_previewIndex % selected.length] : null;

@@ -1,3 +1,6 @@
+// FILE: services/push_notification_service.dart
+// Firebase Cloud Messaging (push) + local notifications: permission, FCM token save, foreground/background/tap handling.
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -19,26 +22,9 @@ import '../utils/nav_key.dart';
 import '../utils/notification_badge.dart';
 import '../utils/service_locator.dart';
 
-/// Must be a *top-level* (or static) function — the OS spins up a fresh,
-/// isolated Dart isolate to run this when a push arrives while the app is
-/// fully killed/backgrounded, so it can't touch any state from main().
-///
-/// On Android this always draws the notification itself (for both
-/// data-only and hybrid `notification`+`data` payloads), rather than
-/// trusting the OS to auto-display a `notification` block. Relying on
-/// that OS-level auto-draw turned out to be unreliable on heavily
-/// battery-restricted OEM builds (e.g. Vivo/FuntouchOS) — the payload
-/// would arrive but nothing showed while the app was backgrounded or
-/// killed, because the OS silently skipped the auto-draw. Drawing it
-/// ourselves here removes that dependency; the only downside is a rare
-/// duplicate on devices where the OS *does* also auto-draw, which is far
-/// preferable to a missing notification.
+/// Firebase messaging background handler.
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  // A fresh isolate has no Firebase app instance yet — anything touching
-  // Firebase (Firestore, etc.) in this handler needs this first. Safe to
-  // call even if already initialized elsewhere; wrapped defensively since
-  // a duplicate-app error here should never crash message handling.
   try {
     await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   } catch (e) {
@@ -50,45 +36,26 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   }
 
   if (!Platform.isAndroid) {
-    // iOS requires `content-available`/mutable-content + a Notification
-    // Service Extension to draw a tray notification from a data-only
-    // background push — that's native (Xcode) config outside this repo's
-    // lib/ folder, not something fixable in Dart.
     return;
   }
 
   try {
-    // A fresh isolate — none of the singletons on [PushNotificationService]
-    // exist here, so the plugin + channel are (re)created locally. Both
-    // calls are safe to repeat; the plugin no-ops if already registered
-    // and creating an existing channel is a harmless overwrite.
     final localNotifications = FlutterLocalNotificationsPlugin();
     const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
     await localNotifications.initialize(const InitializationSettings(android: androidInit));
 
     const channel = AndroidNotificationChannel(
       'aira_notifications',
-      'AiRA Notifications',
-      description: 'Booking, chat and account updates from AiRA',
+      'Sunndari Notifications',
+      description: 'Booking, Chat And Account Updates From Sunndari',
       importance: Importance.max,
     );
     await localNotifications
         .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
         ?.createNotificationChannel(channel);
-
-    // Prefer the `notification` block's title/body when present (that's
-    // what the sender intended to display), falling back to `data` for
-    // data-only payloads. We draw this ourselves instead of trusting the
-    // OS to auto-display a `notification` payload — on heavily
-    // battery-restricted OEM builds (Vivo/FuntouchOS, some Xiaomi/Oppo),
-    // that OS-level auto-draw can silently fail to fire while the app is
-    // backgrounded/killed, even though the payload arrived. Drawing it
-    // ourselves here removes that dependency; worst case on a device
-    // where the OS *does* also auto-draw is a rare duplicate, which is
-    // far better than a missing notification.
     final title = message.notification?.title ??
         message.data['title']?.toString() ??
-        'AiRA';
+        'Sunndari';
     final body = message.notification?.body ??
         message.data['message']?.toString() ??
         message.data['body']?.toString() ??
@@ -108,8 +75,6 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
           visibility: NotificationVisibility.public,
         ),
       ),
-      // Same shape _handleTapPayload expects — guarantees a tap on this
-      // notification routes to the right screen, same as the foreground case.
       payload: jsonEncode(message.data),
     );
   } catch (e) {
@@ -117,35 +82,15 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   }
 }
 
-/// One place for everything push-notification related.
-///
-/// Uses **both** a Firebase topic *and* a Firestore-stored token:
-///  • on login, the device subscribes itself to the Firebase topic
-///    `user_<userId>` (Firebase's own servers — nothing to save anywhere)
-///  • the device's FCM token is also written to Firestore, collection
-///    `fcm_tokens`, document id = the user's id — e.g. `fcm_tokens/8`,
-///    with fields `userId`, `fcmToken`, `platform`, `isActive`. Backend
-///    can read this doc directly to send a push to one specific device,
-///    without needing any column in the Django database.
-///  • on logout, the device unsubscribes from the topic and flips
-///    `isActive` to false on its Firestore token doc
-///
-/// Besides that, this class also:
-///  • asks for notification permission
-///  • shows a local notification (tray + lock screen) when a push arrives
-///    while the app is in the foreground — Android doesn't do this on its
-///    own, only iOS does
-///  • routes a tap on any notification (foreground, background, or a cold
-///    start from a killed state) to the right screen: the chat if it's a
-///    chat message, otherwise the notification detail screen
+/// Push Notification Service — API/data layer.
 class PushNotificationService {
   PushNotificationService._();
   static final PushNotificationService instance = PushNotificationService._();
 
   static const _androidChannel = AndroidNotificationChannel(
     'aira_notifications',
-    'AiRA Notifications',
-    description: 'Booking, chat and account updates from AiRA',
+    'Sunndari Notifications',
+    description: 'Booking, Chat And Account Updates From Sunndari',
     importance: Importance.max,
   );
 
@@ -154,25 +99,17 @@ class PushNotificationService {
 
   bool _localNotificationsInitialized = false;
   bool _messagingInitialized = false;
-
-  /// The topic we're currently subscribed to (`user_<userId>`), so we can
-  /// cleanly unsubscribe from it on logout.
   String? _subscribedTopic;
-
-  /// Live Firestore listener on `user/<userId>/notifications`, kept only
-  /// so the bell's green dot ([NotificationBadge.hasUnread]) reflects an
-  /// unread item the instant the backend writes it there — even if the
-  /// Notifications screen itself is never opened. Cancelled on logout.
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _badgeSub;
 
-  // ── Step 1: local-notifications plugin (call once, early in main()) ────
+  /// Initialises local notifications.
   Future<void> initLocalNotifications() async {
     if (_localNotificationsInitialized) return;
     _localNotificationsInitialized = true;
 
     const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
     const iosInit = DarwinInitializationSettings(
-      requestAlertPermission: false, // we ask via FirebaseMessaging.requestPermission instead
+      requestAlertPermission: false,
       requestBadgePermission: false,
       requestSoundPermission: false,
     );
@@ -187,13 +124,10 @@ class PushNotificationService {
     final androidImpl = _localNotifications
         .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
     await androidImpl?.createNotificationChannel(_androidChannel);
-    // Android 13+ requires this separate runtime permission for the tray;
-    // FirebaseMessaging.requestPermission() below covers it too, but this
-    // makes sure it's asked even before login (e.g. from a splash retry).
     await androidImpl?.requestNotificationsPermission();
   }
 
-  // ── Step 2: FCM itself (call once the user is logged in) ───────────────
+  /// Initialises messaging.
   Future<void> initMessaging() async {
     if (_messagingInitialized) return;
     _messagingInitialized = true;
@@ -202,9 +136,6 @@ class PushNotificationService {
 
     await messaging.requestPermission(alert: true, badge: true, sound: true);
 
-    // iOS: let the OS show its native banner/lock-screen alert itself for
-    // foreground pushes. Android has no such switch — we show our own
-    // local notification for foreground pushes further down.
     await messaging.setForegroundNotificationPresentationOptions(
       alert: true,
       badge: true,
@@ -215,25 +146,19 @@ class PushNotificationService {
     await _saveToken();
     await _printTokenForTesting();
     _listenForFirestoreBadge();
-
-    // Keep both the Firestore doc and the backend copy fresh if FCM
-    // rotates the token.
     messaging.onTokenRefresh.listen((token) => _saveToken(token));
 
-    // App open in foreground when the push arrives.
     FirebaseMessaging.onMessage.listen(_onForegroundMessage);
 
-    // App was in the background and the user tapped the tray notification.
     FirebaseMessaging.onMessageOpenedApp.listen((message) => _navigateFor(message.data));
 
-    // App was fully killed and got opened *by* tapping a notification.
     final initialMessage = await messaging.getInitialMessage();
     if (initialMessage != null) {
-      // Let the first frame settle before pushing a route.
       WidgetsBinding.instance.addPostFrameCallback((_) => _navigateFor(initialMessage.data));
     }
   }
 
+  /// Saves token.
   Future<void> _saveToken([String? token]) async {
     final fcmToken = token ?? await FirebaseMessaging.instance.getToken();
     if (fcmToken == null) return;
@@ -243,6 +168,7 @@ class PushNotificationService {
     ]);
   }
 
+  /// Saves token to firestore.
   Future<void> _saveTokenToFirestore([String? token]) async {
     final userId = AppSession.instance.userId;
     if (userId == null) return;
@@ -261,10 +187,8 @@ class PushNotificationService {
     }
   }
 
-  /// Sends the token to the backend through the real
-  /// PUT /users/profile/update/ endpoint (see [UserService.updateFcmToken])
-  /// so it's stored in the Django DB against this user, alongside the
-  /// Firestore copy. Best-effort — a failure here never blocks push setup.
+  /// Saves token to backend.
+  /// API: userService.updateFcmToken
   Future<void> _saveTokenToBackend(String fcmToken) async {
     if (AppSession.instance.userId == null) return;
     try {
@@ -275,11 +199,7 @@ class PushNotificationService {
     }
   }
 
-  /// TESTING ONLY — prints the raw FCM device token to the debug console
-  /// so you can copy it into Firebase Console → Cloud Messaging →
-  /// "Send test message" and confirm delivery to this exact device.
-  /// Safe to remove once testing is done; it does nothing in release
-  /// builds (kDebugMode-gated) and never sends the token anywhere.
+  /// Prints token for testing.
   Future<void> _printTokenForTesting() async {
     if (!kDebugMode) return;
     try {
@@ -292,9 +212,7 @@ class PushNotificationService {
     }
   }
 
-  /// Subscribes this device to `user_<userId>` on Firebase directly — no
-  /// backend call, no database column. Whoever triggers a push for this
-  /// user just needs to send to that same topic name.
+  /// Subscribes to to own topic.
   Future<void> _subscribeToOwnTopic() async {
     final userId = AppSession.instance.userId;
     if (userId == null) return;
@@ -308,10 +226,7 @@ class PushNotificationService {
     }
   }
 
-  /// Keeps the bell's green dot in sync with Firestore in real time: any
-  /// unread doc under `user/<userId>/notifications` (however it got
-  /// there — backend write, cloud function, anything) lights up the dot
-  /// immediately, without waiting for a push or a screen refresh.
+  /// Listens to for firestore badge.
   void _listenForFirestoreBadge() {
     final userId = AppSession.instance.userId;
     if (userId == null) return;
@@ -332,10 +247,7 @@ class PushNotificationService {
     );
   }
 
-  /// Call on logout — unsubscribes from this user's topic, flips this
-  /// device's Firestore token doc to inactive, and resets so a different
-  /// artist logging in on the same device subscribes/writes *their* own
-  /// topic/token instead of silently no-op'ing because init already ran.
+  /// Resets for logout.
   Future<void> resetForLogout() async {
     await _badgeSub?.cancel();
     _badgeSub = null;
@@ -364,12 +276,8 @@ class PushNotificationService {
     _messagingInitialized = false;
   }
 
-  // ── Foreground push → show it ourselves + flip the bell's green dot ───
+  /// Callback when foreground message happens.
   Future<void> _onForegroundMessage(RemoteMessage message) async {
-    // Log the raw payload the instant it arrives — before any
-    // title/body parsing — so nothing the backend sends is ever hidden.
-    // Useful for spotting fields the notification model doesn't
-    // explicitly read yet (e.g. an OTP embedded in an unexpected key).
     if (kDebugMode) {
       debugPrint('[Push] foreground message: ${message.messageId} | data=${message.data} | notification.title=${message.notification?.title} | notification.body=${message.notification?.body}');
     }
@@ -377,11 +285,10 @@ class PushNotificationService {
     NotificationBadge.instance.markUnread();
 
     final notification = message.notification;
-    final title = notification?.title ?? message.data['title'] as String? ?? 'AiRA';
+    final title = notification?.title ?? message.data['title'] as String? ?? 'Sunndari';
     final body = notification?.body ?? message.data['message'] as String? ?? '';
 
     if (!Platform.isAndroid) {
-      // iOS already shows its native alert (see setForegroundNotificationPresentationOptions).
       return;
     }
 
@@ -396,7 +303,6 @@ class PushNotificationService {
           channelDescription: _androidChannel.description,
           importance: Importance.max,
           priority: Priority.high,
-          // Ensures it shows in full on the lock screen, not hidden.
           visibility: NotificationVisibility.public,
         ),
       ),
@@ -404,6 +310,7 @@ class PushNotificationService {
     );
   }
 
+  /// Handles tap payload.
   void _handleTapPayload(String? payload) {
     if (payload == null || payload.isEmpty) return;
     try {
@@ -414,17 +321,13 @@ class PushNotificationService {
     }
   }
 
-  /// Fires a local tray notification for a Help Center reply — used by
-  /// [HelpCenterNotifier] as a stand-in for a real backend push (Help
-  /// Center has no server-sent push of its own; see that file). Reuses
-  /// the same channel/tap handling as any other push, so tapping this
-  /// routes through [_navigateFor] into Help Center exactly like a real one.
+  /// Shows help center reply.
   Future<void> showHelpCenterReply(String body) async {
     await initLocalNotifications();
     await _localNotifications.show(
       DateTime.now().millisecondsSinceEpoch ~/ 1000,
-      'Support replied',
-      body.isEmpty ? 'You have a new message from support.' : body,
+      'Support Replied',
+      body.isEmpty ? 'You Have A New Message From Support.' : body,
       NotificationDetails(
         android: AndroidNotificationDetails(
           _androidChannel.id,
@@ -439,15 +342,7 @@ class PushNotificationService {
     );
   }
 
-  /// Routes a tap to the right screen:
-  ///  • a chat-type push with a `booking_id` → straight into that chat,
-  ///    titled with the sender's real name when the payload includes one
-  ///    (never a hardcoded/generic label if a real name is available)
-  ///  • a booking-type push (new booking, confirmed, cancelled, reminder,
-  ///    etc.) with a `booking_id` → straight into [BookingDetailScreen]
-  ///    for that booking, same screen reached from the Bookings tab
-  ///  • anything else with a `notification_id` → the notification detail
-  ///    screen (which itself marks it read and can hand off to chat/booking)
+  /// Navigates to for.
   void _navigateFor(Map<String, dynamic> data) {
     final nav = navigatorKey.currentState;
     if (nav == null) return;
@@ -467,22 +362,11 @@ class PushNotificationService {
       return;
     }
 
-    // Some backends label a chat push "chat", "chat_message", "message",
-    // "new_message" etc — match any of those rather than only the exact
-    // string "chat", so a real chat push never silently falls through to
-    // "do nothing" just because the label doesn't match one hardcoded word.
     final looksLikeChat =
         type.contains('chat') || type.contains('message');
-    // Same idea for booking-type pushes — "booking", "booking_confirmed",
-    // "new_booking", "booking_cancelled", "booking_reminder", etc.
     final looksLikeBooking = type.contains('book');
 
     if (looksLikeChat && bookingId != null) {
-      // Whoever sent the message — could be the artist's customer, or
-      // (if this build is ever used by a customer) the artist. Each
-      // conversation's other participant is a different person/id, so
-      // pull whatever name the backend included rather than a static
-      // label like "Chat".
       final senderName = (data['sender_name'] ??
           data['senderName'] ??
           data['customer_name'] ??
@@ -500,9 +384,6 @@ class PushNotificationService {
     }
 
     if (looksLikeBooking && bookingId != null) {
-      // BookingDetailScreen is self-sufficient with just a bookingId — it
-      // fetches the booking, package, statuses and customer name itself
-      // (see its doc comment), so no BookingSlot needs to be built here.
       nav.push(MaterialPageRoute(builder: (_) => BookingDetailScreen(bookingId: bookingId)));
       return;
     }
@@ -513,10 +394,6 @@ class PushNotificationService {
     }
 
     if (bookingId != null) {
-      // Type wasn't recognizable as chat or booking, but there's still a
-      // bookingId — the booking detail screen is the safer generic
-      // fallback (it's read-only/informational either way), rather than
-      // assuming this was a chat push.
       nav.push(MaterialPageRoute(builder: (_) => BookingDetailScreen(bookingId: bookingId)));
     }
   }

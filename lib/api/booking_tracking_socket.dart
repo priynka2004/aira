@@ -1,26 +1,23 @@
+// FILE: api/booking_tracking_socket.dart
+// WebSocket that sends the artist's live location while travelling to a booking.
+
 import 'dart:async';
 import 'dart:convert';
 import 'package:web_socket_channel/web_socket_channel.dart';
+import '../utils/api_logger.dart';
 import 'api_endpoints.dart';
 
-/// Artist-side socket that streams live GPS updates while a journey is in
-/// progress, so the customer app can show the artist moving on a map.
-///
-/// TODO(backend): `wss://.../ws/booking-tracking/{bookingId}/?token={jwt}`
-/// mirrors the existing chat socket's URL shape
-/// (`wss://.../ws/chat/{bookingId}/?token=`) — matches [ChatSocket] in
-/// `chat_socket.dart`, which *is* live, so the same infra should be able
-/// to host this. If the endpoint doesn't exist yet, [connect] fails
-/// silently and [sendLocation] becomes a no-op; the rest of the journey
-/// flow (PIN verification, stage transitions) does not depend on this
-/// socket succeeding.
+/// Booking Tracking Socket.
 class BookingTrackingSocket {
   WebSocketChannel? _channel;
   final _doneController = StreamController<void>.broadcast();
 
+  /// Callback when done happens.
   Stream<void> get onDone => _doneController.stream;
+  /// Returns true if connected.
   bool get isConnected => _channel != null;
 
+  /// Opens the connection.
   void connect(int bookingId, String token) {
     close();
     try {
@@ -28,43 +25,52 @@ class BookingTrackingSocket {
         '${ApiEndpoints.baseUrl.replaceFirst('https://', 'wss://').replaceFirst('http://', 'ws://')}'
         '/ws/booking-tracking/$bookingId/',
       ).replace(queryParameters: {'token': token});
-      _channel = WebSocketChannel.connect(uri);
-      _channel!.stream.listen(
-        (_) {
-          // Artist side doesn't need to read anything back — it's purely
-          // a broadcaster. Kept here so a dropped connection still fires
-          // [onDone] below.
+      ApiLog.ws('tracking', 'connecting', 'booking=$bookingId');
+      final channel = WebSocketChannel.connect(uri);
+      _channel = channel;
+
+      var finished = false;
+      void finish() {
+        if (finished) return;
+        finished = true;
+        if (identical(_channel, channel)) _channel = null;
+        _doneController.add(null);
+      }
+
+      channel.stream.listen(
+        (data) {
+          ApiLog.ws('tracking', '← recv', data);
         },
         onDone: () {
-          _channel = null;
-          _doneController.add(null);
+          ApiLog.ws('tracking', 'closed', 'code=${channel.closeCode} reason=${channel.closeReason}');
+          finish();
         },
-        onError: (_) {
-          _channel = null;
-          _doneController.add(null);
+        onError: (e) {
+          ApiLog.ws('tracking', 'error', e);
+          finish();
         },
         cancelOnError: true,
       );
-    } catch (_) {
-      // TODO(backend): socket endpoint not live yet — [isConnected] stays
-      // false and [sendLocation] is a safe no-op below.
+    } catch (e) {
+      ApiLog.ws('tracking', 'connect failed', e);
       _channel = null;
     }
   }
 
-  /// Sends one location fixed point. Call this periodically (e.g. every
-  /// 5–10s via `Geolocator.getPositionStream`) for as long as the journey
-  /// is `journeyStarted` or `arrived`.
+  /// Sends location.
   void sendLocation(double lat, double lng) {
     final channel = _channel;
     if (channel == null) return;
     try {
-      channel.sink.add(jsonEncode({'type': 'location.update', 'lat': lat, 'lng': lng}));
-    } catch (_) {
-      // Best-effort — a dropped send just means one skipped tick.
+      final payload = jsonEncode({'type': 'location.update', 'lat': lat, 'lng': lng});
+      ApiLog.ws('tracking', '→ send', payload);
+      channel.sink.add(payload);
+    } catch (e) {
+      ApiLog.ws('tracking', 'send failed', e);
     }
   }
 
+  /// Closes the connection.
   void close() {
     _channel?.sink.close();
     _channel = null;

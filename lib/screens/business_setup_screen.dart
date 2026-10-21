@@ -1,37 +1,65 @@
+// FILE: screens/business_setup_screen.dart
+// SCREEN: Business Setup — services offered, work locations, availability.
+//
+// APIs used:
+//   GET /core/service-sub-category/get_all/
+//   GET /core/location-type/get_all/
+//   GET /artists/services/get_all/
+//   GET /artists/locations/get_all/
+//   GET /artists/availability/schedule/get_all/
+//   GET /artists/availability/block/get_all/
+//   GET /core/service-category/get_all/
+//   POST /artists/services/add/
+//   DELETE /artists/services/remove/
+//   POST /artists/locations/add/
+//   DELETE /artists/locations/remove/
+//   POST /artists/availability/schedule/set/
+//   DELETE /artists/availability/schedule/remove/
+//   POST /artists/availability/block/add/
+//   (+1 more)
+
 import 'package:flutter/material.dart';
 import '../theme/tokens.dart';
+import 'packages_screen.dart';
 import '../widgets/common.dart';
 import '../models/auth/add_location.dart';
 import '../models/auth/set_schedule.dart';
 import '../models/auth/add_block.dart';
 import '../models/artist/add_service.dart';
+import '../models/core/service_category.dart';
 import '../models/core/service_sub_category.dart';
 import '../models/core/location_type.dart';
 import '../utils/app_feedback.dart';
 import '../utils/service_locator.dart';
+import '../widgets/sunndari_time_picker.dart';
 
 const _dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
+/// As list.
 List<dynamic> _asList(dynamic json) {
   if (json is List) return json;
   if (json is Map && json['data'] is List) return json['data'] as List;
   return const [];
 }
 
-/// One screen, three tabs — mirrors the artist's "business setup" area of
-/// the Sunndari app: which services they offer, where they work, and when.
+/// SCREEN: Business Setup — services offered, work locations, availability.
 class BusinessSetupScreen extends StatefulWidget {
-  const BusinessSetupScreen({super.key});
+  final bool embedded;
+  /// 'services' or 'locations' → show only that part (no inner switch). null → both (old behaviour).
+  final String? only;
+  const BusinessSetupScreen({super.key, this.embedded = false, this.only});
 
   @override
   State<BusinessSetupScreen> createState() => _BusinessSetupScreenState();
 }
 
+/// State of [BusinessSetupScreen] — holds the screen data and logic.
 class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
-  String _tab = 'services';
+  late String _tab = widget.only ?? 'services';
   bool _loading = true;
   String? _error;
 
+  List<ServiceCategory> _categories = [];
   List<ServiceSubCategory> _subCategories = [];
   List<LocationType> _locationTypes = [];
   List<dynamic> _myServices = [];
@@ -39,12 +67,15 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   List<dynamic> _mySchedule = [];
   List<dynamic> _myBlocks = [];
 
+  /// Runs once when the screen opens; starts: _load().
   @override
   void initState() {
     super.initState();
     _load();
   }
 
+  /// Loads this screen's data.
+  /// Uses 7 APIs (see inline notes).
   Future<void> _load() async {
     setState(() {
       _loading = true;
@@ -52,12 +83,20 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     });
     try {
       final results = await Future.wait([
+        // API call: coreService.getAllServiceSubCategories → GET /core/service-sub-category/get_all/
         ServiceLocator.coreService.getAllServiceSubCategories(limit: 100),
+        // API call: coreService.getAllLocationTypes → GET /core/location-type/get_all/
         ServiceLocator.coreService.getAllLocationTypes(limit: 50),
+        // API call: artistService.getAllServices → GET /artists/services/get_all/
         ServiceLocator.artistService.getAllServices(),
+        // API call: artistService.getAllLocations → GET /artists/locations/get_all/
         ServiceLocator.artistService.getAllLocations(),
+        // API call: artistService.getAllSchedules → GET /artists/availability/schedule/get_all/
         ServiceLocator.artistService.getAllSchedules(),
+        // API call: artistService.getAllBlocks → GET /artists/availability/block/get_all/
         ServiceLocator.artistService.getAllBlocks(),
+        // API call: coreService.getAllServiceCategories → GET /core/service-category/get_all/
+        ServiceLocator.coreService.getAllServiceCategories(limit: 50),
       ]);
       if (!mounted) return;
       setState(() {
@@ -67,6 +106,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         _myLocations = _asList(results[3]);
         _mySchedule = _asList(results[4]);
         _myBlocks = _asList(results[5]);
+        _categories = (results[6].data as List<ServiceCategory>).where((c) => c.isActive).toList();
         _loading = false;
       });
     } catch (e) {
@@ -78,26 +118,39 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     }
   }
 
+  /// Sub category name.
   String _subCategoryName(int? id) {
     final m = _subCategories.where((s) => s.subCategoryId == id);
     return m.isNotEmpty ? m.first.name : 'Service #$id';
   }
 
+  /// Location type name.
   String _locationTypeName(int? id) {
     final m = _locationTypes.where((l) => l.locationTypeId == id);
     return m.isNotEmpty ? m.first.name : 'Location #$id';
   }
 
-  // ── Services ────────────────────────────────────────────────────────
+  /// Adds service.
+  /// API: artistService.addService → POST /artists/services/add/
   Future<void> _addService() async {
     final available =
-        _subCategories.where((s) => !_myServices.any((m) => m['subCategoryId'] == s.subCategoryId)).toList();
+    _subCategories.where((s) => !_myServices.any((m) => m['subCategoryId'] == s.subCategoryId)).toList();
     if (available.isEmpty) {
-      AppFeedback.showInfo(context, 'You already offer every listed service');
+      AppFeedback.showInfo(context, 'You Already Offer Every Listed Service');
       return;
     }
-    int selected = available.first.subCategoryId;
+    final cats = _categories.where((c) => available.any((s) => s.categoryId == c.categoryId)).toList();
+    int? catId = cats.isNotEmpty ? cats.first.categoryId : null;
+    List<ServiceSubCategory> typesOf(int? c) =>
+        c == null ? available : available.where((s) => s.categoryId == c).toList();
+    int selected = typesOf(catId).first.subCategoryId;
     final priceCtrl = TextEditingController();
+
+    Widget box(Widget child) => Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14),
+      decoration: BoxDecoration(color: AiraColors.bg, borderRadius: BorderRadius.circular(14), border: Border.all(color: AiraColors.hair)),
+      child: child,
+    );
 
     final ok = await showModalBottomSheet<bool>(
       context: context,
@@ -105,38 +158,50 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (ctx) => StatefulBuilder(builder: (ctx, setSheet) {
-        return Padding(
+        return SingleChildScrollView(
           padding: EdgeInsets.only(left: 24, right: 24, top: 20, bottom: 20 + MediaQuery.of(ctx).viewInsets.bottom),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Add a service', style: AiraText.serif(fontSize: 18, fontWeight: FontWeight.w600)),
+              Text('Add A Service', style: AiraText.serif(fontSize: 18, fontWeight: FontWeight.w600)),
               const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14),
-                decoration: BoxDecoration(color: AiraColors.bg, borderRadius: BorderRadius.circular(14), border: Border.all(color: AiraColors.hair)),
-                child: DropdownButtonHideUnderline(
+              if (cats.isNotEmpty) ...[
+                Text('SERVICE', style: AiraText.sans(fontSize: 11, fontWeight: FontWeight.w600, color: AiraColors.charcoalSoft)),
+                const SizedBox(height: 6),
+                box(DropdownButtonHideUnderline(
                   child: DropdownButton<int>(
                     isExpanded: true,
-                    value: selected,
-                    items: available.map((s) => DropdownMenuItem(value: s.subCategoryId, child: Text(s.name))).toList(),
-                    onChanged: (v) => setSheet(() => selected = v!),
+                    value: catId,
+                    items: cats.map((c) => DropdownMenuItem(value: c.categoryId, child: Text(c.name))).toList(),
+                    onChanged: (v) => setSheet(() {
+                      catId = v;
+                      selected = typesOf(v).first.subCategoryId;
+                    }),
                   ),
+                )),
+                const SizedBox(height: 12),
+              ],
+              Text('TYPE', style: AiraText.sans(fontSize: 11, fontWeight: FontWeight.w600, color: AiraColors.charcoalSoft)),
+              const SizedBox(height: 6),
+              box(DropdownButtonHideUnderline(
+                child: DropdownButton<int>(
+                  isExpanded: true,
+                  value: selected,
+                  items: typesOf(catId).map((s) => DropdownMenuItem(value: s.subCategoryId, child: Text(s.name))).toList(),
+                  onChanged: (v) => setSheet(() {
+                    selected = v!;
+                  }),
                 ),
-              ),
+              )),
               const SizedBox(height: 12),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14),
-                decoration: BoxDecoration(color: AiraColors.bg, borderRadius: BorderRadius.circular(14), border: Border.all(color: AiraColors.hair)),
-                child: TextField(
-                  controller: priceCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(border: InputBorder.none, hintText: 'Your price for this (optional)'),
-                ),
-              ),
+              box(TextField(
+                controller: priceCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(border: InputBorder.none, hintText: 'Your Price For This (Optional)'),
+              )),
               const SizedBox(height: 16),
-              PrimaryButton(label: 'Add service', expand: true, onTap: () => Navigator.of(ctx).pop(true)),
+              PrimaryButton(label: 'Add Service', expand: true, onTap: () => Navigator.of(ctx).pop(true)),
             ],
           ),
         );
@@ -144,10 +209,17 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     );
 
     if (ok != true) return;
+    final rawPrice = priceCtrl.text.trim();
+    final price = rawPrice.isEmpty ? null : double.tryParse(rawPrice);
+    if (rawPrice.isNotEmpty && (price == null || price < 0)) {
+      if (mounted) AppFeedback.showWarning(context, 'Enter A Valid, Non-Negative Price.');
+      return;
+    }
     try {
+      // API call: artistService.addService → POST /artists/services/add/
       await ServiceLocator.artistService.addService(AddService(
         subCategoryId: selected,
-        customPrice: double.tryParse(priceCtrl.text.trim()),
+        customPrice: price,
       ));
       await _load();
     } catch (e) {
@@ -157,9 +229,12 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     }
   }
 
+  /// Removes service.
+  /// API: artistService.removeService → DELETE /artists/services/remove/
   Future<void> _removeService(int subCategoryId) async {
     setState(() => _myServices = _myServices.where((m) => m['subCategoryId'] != subCategoryId).toList());
     try {
+      // API call: artistService.removeService → DELETE /artists/services/remove/
       await ServiceLocator.artistService.removeService(subCategoryId);
     } catch (e) {
       if (mounted) {
@@ -169,12 +244,13 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     }
   }
 
-  // ── Locations ───────────────────────────────────────────────────────
+  /// Adds location.
+  /// API: artistService.addLocation → POST /artists/locations/add/
   Future<void> _addLocation() async {
     final available =
-        _locationTypes.where((l) => !_myLocations.any((m) => m['locationTypeId'] == l.locationTypeId)).toList();
+    _locationTypes.where((l) => !_myLocations.any((m) => m['locationTypeId'] == l.locationTypeId)).toList();
     if (available.isEmpty) {
-      AppFeedback.showInfo(context, 'All location types already added');
+      AppFeedback.showInfo(context, 'All Location Types Already Added');
       return;
     }
     int selected = available.first.locationTypeId;
@@ -189,7 +265,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Add a location type', style: AiraText.serif(fontSize: 18, fontWeight: FontWeight.w600)),
+              Text('Add A Location Type', style: AiraText.serif(fontSize: 18, fontWeight: FontWeight.w600)),
               const SizedBox(height: 16),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 14),
@@ -204,7 +280,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                 ),
               ),
               const SizedBox(height: 16),
-              PrimaryButton(label: 'Add location', expand: true, onTap: () => Navigator.of(ctx).pop(true)),
+              PrimaryButton(label: 'Add Location', expand: true, onTap: () => Navigator.of(ctx).pop(true)),
             ],
           ),
         );
@@ -212,6 +288,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     );
     if (ok != true) return;
     try {
+      // API call: artistService.addLocation → POST /artists/locations/add/
       await ServiceLocator.artistService.addLocation(AddLocation(locationTypeId: selected));
       await _load();
     } catch (e) {
@@ -221,9 +298,12 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     }
   }
 
+  /// Removes location.
+  /// API: artistService.removeLocation → DELETE /artists/locations/remove/
   Future<void> _removeLocation(int locationTypeId) async {
     setState(() => _myLocations = _myLocations.where((m) => m['locationTypeId'] != locationTypeId).toList());
     try {
+      // API call: artistService.removeLocation → DELETE /artists/locations/remove/
       await ServiceLocator.artistService.removeLocation(locationTypeId);
     } catch (e) {
       if (mounted) {
@@ -233,7 +313,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     }
   }
 
-  // ── Schedule ────────────────────────────────────────────────────────
+  /// Sets day.
+  /// API: artistService.setSchedule → POST /artists/availability/schedule/set/
   Future<void> _setDay(int dayOfWeek) async {
     final existing = _mySchedule.where((s) => s['dayOfWeek'] == dayOfWeek);
     TimeOfDay start = existing.isNotEmpty ? _parseTime(existing.first['startTime']) : const TimeOfDay(hour: 9, minute: 0);
@@ -245,7 +326,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (ctx) => StatefulBuilder(builder: (ctx, setSheet) {
         Future<void> pick(bool isStart) async {
-          final picked = await showTimePicker(context: ctx, initialTime: isStart ? start : end);
+          final picked = await pickSunndariTime(ctx, initial: isStart ? start : end, helpText: isStart ? 'Start Time' : 'End Time');
           if (picked != null) setSheet(() => isStart ? start = picked : end = picked);
         }
 
@@ -273,6 +354,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     );
     if (ok != true) return;
     try {
+      // API call: artistService.setSchedule → POST /artists/availability/schedule/set/
       await ServiceLocator.artistService.setSchedule(SetSchedule(
         dayOfWeek: dayOfWeek,
         startTime: '${start.hour.toString().padLeft(2, '0')}:${start.minute.toString().padLeft(2, '0')}:00',
@@ -286,6 +368,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     }
   }
 
+  /// Parses time.
   TimeOfDay _parseTime(dynamic v) {
     try {
       final parts = v.toString().split(':');
@@ -295,9 +378,12 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     }
   }
 
+  /// Removes day.
+  /// API: artistService.removeSchedule → DELETE /artists/availability/schedule/remove/
   Future<void> _removeDay(int dayOfWeek) async {
     setState(() => _mySchedule = _mySchedule.where((s) => s['dayOfWeek'] != dayOfWeek).toList());
     try {
+      // API call: artistService.removeSchedule → DELETE /artists/availability/schedule/remove/
       await ServiceLocator.artistService.removeSchedule(dayOfWeek);
     } catch (e) {
       if (mounted) {
@@ -307,77 +393,49 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     }
   }
 
-  Future<void> _addBlock() async {
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: DateTime.now().add(const Duration(days: 1)),
-      firstDate: DateTime.now(),
-      lastDate: DateTime.now().add(const Duration(days: 365)),
-    );
-    if (picked == null) return;
-    final dateStr = '${picked.year.toString().padLeft(4, '0')}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}';
-    try {
-      await ServiceLocator.artistService.addBlock(AddBlock(blockDate: dateStr));
-      await _load();
-    } catch (e) {
-      if (mounted) {
-        AppFeedback.showError(context, e);
-      }
-    }
-  }
-
-  Future<void> _removeBlock(String blockDate) async {
-    setState(() => _myBlocks = _myBlocks.where((b) => b['blockDate'] != blockDate).toList());
-    try {
-      await ServiceLocator.artistService.removeBlock(blockDate);
-    } catch (e) {
-      if (mounted) {
-        AppFeedback.showError(context, e);
-      }
-      _load();
-    }
-  }
-
+  /// Builds the UI.
   @override
   Widget build(BuildContext context) {
+    final Widget content = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (!widget.embedded)
+          AiraScreenHeader(title: 'Business Setup', onBack: () => Navigator.of(context).pop()),
+        if (widget.only == null)
+          AiraSegTabs(
+            tabs: const [
+              SegTabItem('services', 'Services'),
+              SegTabItem('locations', 'Locations'),
+            ],
+            active: _tab,
+            onSelect: (t) => setState(() => _tab = t),
+          ),
+        Expanded(
+          child: _loading
+              ? const Center(child: CircularProgressIndicator(strokeWidth: 2.4, color: AiraColors.rose))
+              : _error != null
+              ? AiraErrorState(message: _error!, onRetry: _load)
+              : _buildTab(),
+        ),
+      ],
+    );
+    if (widget.embedded) return content;
     return Scaffold(
       backgroundColor: AiraColors.bg,
-      body: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            AiraScreenHeader(title: 'Business setup', onBack: () => Navigator.of(context).pop()),
-            AiraSegTabs(
-              tabs: const [
-                SegTabItem('services', 'Services'),
-                SegTabItem('locations', 'Locations'),
-                SegTabItem('schedule', 'Schedule'),
-              ],
-              active: _tab,
-              onSelect: (t) => setState(() => _tab = t),
-            ),
-            Expanded(
-              child: _loading
-                  ? const Center(child: CircularProgressIndicator(strokeWidth: 2.4, color: AiraColors.rose))
-                  : _error != null
-                      ? AiraErrorState(message: _error!, onRetry: _load)
-                      : _buildTab(),
-            ),
-          ],
-        ),
-      ),
+      body: SafeArea(child: content),
     );
   }
 
+  /// UI: builds tab.
   Widget _buildTab() {
     switch (_tab) {
       case 'locations':
         return _listSection(
           items: _myLocations,
           onAdd: _addLocation,
-          addLabel: 'Add location',
+          addLabel: 'Add Location',
           rowBuilder: (m) => _row(_locationTypeName(m['locationTypeId']), null, () => _removeLocation(m['locationTypeId'])),
-          emptyText: 'No service locations yet — add where you work (salon / home visit / etc).',
+          emptyText: 'No Service Locations Yet — Add Where You Work (Salon / Home Visit / Etc).',
         );
       case 'schedule':
         return ListView(
@@ -396,7 +454,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                       SizedBox(width: 40, child: Text(_dayNames[i], style: AiraText.sans(fontSize: 13.5, fontWeight: FontWeight.w600))),
                       Expanded(
                         child: Text(
-                          has ? '${existing.first['startTime']} – ${existing.first['endTime']}' : 'Not available',
+                          has ? '${existing.first['startTime']} – ${existing.first['endTime']}' : 'Not Available',
                           style: AiraText.sans(fontSize: 13, color: has ? AiraColors.charcoal : AiraColors.charcoalSoft),
                         ),
                       ),
@@ -412,33 +470,16 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                 ),
               );
             }),
-            const SizedBox(height: 12),
-            Text('BLOCKED DATES', style: AiraText.sans(fontSize: 12, fontWeight: FontWeight.w600, color: AiraColors.charcoalSoft)),
-            const SizedBox(height: 8),
-            ..._myBlocks.map((b) => Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: _row(b['blockDate']?.toString() ?? '', b['note']?.toString(), () => _removeBlock(b['blockDate']?.toString() ?? '')),
-                )),
-            const SizedBox(height: 8),
-            GhostButton(label: 'Block a date', icon: Icons.event_busy_outlined, onTap: _addBlock),
           ],
         );
       case 'services':
       default:
-        return _listSection(
-          items: _myServices,
-          onAdd: _addService,
-          addLabel: 'Add service',
-          rowBuilder: (m) => _row(
-            _subCategoryName(m['subCategoryId']),
-            m['customPrice'] != null ? '₹${m['customPrice']}' : null,
-            () => _removeService(m['subCategoryId']),
-          ),
-          emptyText: 'No services added yet — add the services you offer clients.',
-        );
+      // Services and their packages / prices are one thing — managed in one place.
+        return const PackagesScreen(embedded: true);
     }
   }
 
+  /// UI piece: list section.
   Widget _listSection({
     required List<dynamic> items,
     required VoidCallback onAdd,
@@ -456,15 +497,16 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           )
         else
           ...items.map((m) => Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: rowBuilder(Map<String, dynamic>.from(m as Map)),
-              )),
+            padding: const EdgeInsets.only(bottom: 10),
+            child: rowBuilder(Map<String, dynamic>.from(m as Map)),
+          )),
         const SizedBox(height: 8),
         GhostButton(label: addLabel, icon: Icons.add, onTap: onAdd),
       ],
     );
   }
 
+  /// UI piece: row.
   Widget _row(String title, String? subtitle, VoidCallback onRemove) {
     return AiraCard(
       padding: const EdgeInsets.all(14),

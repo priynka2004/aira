@@ -1,18 +1,26 @@
-import 'dart:convert';
-import 'package:http/http.dart' as http;
+// FILE: utils/address_geocoder.dart
+// Converts a text address into lat/lng (used for distance to customer) + LatLng class.
 
-/// One-time text-address -> lat/lng lookup via OpenStreetMap Nominatim --
-/// the same free/no-key geocoding service the customer app already uses
-/// (in reverse) for its "detect my location" address form.
-///
-/// This is deliberately called ONCE per address and cached by the
-/// caller: a booking's service address is a fixed point (it doesn't
-/// move), unlike the artist's own position, which is why only this
-/// lookup is a one-shot while the artist's side of the distance
-/// calculation comes from a live GPS stream.
+import 'dart:convert';
+import 'api_logger.dart';
+import '../models/user/customer_address.dart';
+
+/// Address Geocoder.
 class AddressGeocoder {
   static final Map<String, LatLng> _cache = {};
 
+  /// Exact coordinates from the API if present, otherwise geocodes the address
+  /// (full address first, then shorter fallbacks).
+  static Future<LatLng?> forAddress(CustomerAddress address) async {
+    if (address.hasCoordinates) return LatLng(address.latitude!, address.longitude!);
+    for (final q in address.geocodeQueries) {
+      final r = await geocode(q);
+      if (r != null) return r;
+    }
+    return null;
+  }
+
+  /// Converts address to coordinates for.
   static Future<LatLng?> geocode(String query) async {
     if (query.trim().isEmpty) return null;
     final cached = _cache[query];
@@ -21,11 +29,12 @@ class AddressGeocoder {
     try {
       final url = Uri.parse(
         'https://nominatim.openstreetmap.org/search'
-        '?q=${Uri.encodeQueryComponent(query)}&format=json&limit=1',
+        '?q=${Uri.encodeQueryComponent(query)}&format=json&limit=1&countrycodes=in',
       );
-      final response = await http.get(
+      final response = await ApiLog.get(
         url,
         headers: {'Accept-Language': 'en', 'User-Agent': 'SunndariArtistApp/1.0'},
+        tag: 'HTTP/geocode',
       );
       if (response.statusCode != 200) return null;
       final results = jsonDecode(response.body) as List<dynamic>;
@@ -37,12 +46,14 @@ class AddressGeocoder {
       final result = LatLng(lat, lng);
       _cache[query] = result;
       return result;
-    } catch (_) {
+    } catch (e) {
+      ApiLog.info('AddressGeocoder', 'geocode failed for "$query": $e');
       return null;
     }
   }
 }
 
+/// Lat Lng.
 class LatLng {
   final double lat;
   final double lng;

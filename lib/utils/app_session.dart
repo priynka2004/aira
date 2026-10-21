@@ -1,7 +1,10 @@
+// FILE: utils/app_session.dart
+// Login session: tokens, user id, name, role (stored in SharedPreferences).
+
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Singleton session holder — stores auth tokens and basic user info.
+/// App Session.
 class AppSession {
   AppSession._();
   static final AppSession instance = AppSession._();
@@ -18,6 +21,7 @@ class AppSession {
   String? name;
   String? role;
 
+  /// Loads this screen's data.
   Future<void> load() async {
     final p = await SharedPreferences.getInstance();
     accessToken  = p.getString(_kAccessToken);
@@ -31,6 +35,7 @@ class AppSession {
     }
   }
 
+  /// Saves the entered data.
   Future<void> save({
     required String accessToken,
     required String refreshToken,
@@ -55,6 +60,7 @@ class AppSession {
     }
   }
 
+  /// Clears stored data.
   Future<void> clear() async {
     accessToken = refreshToken = name = role = null;
     userId = null;
@@ -66,5 +72,6 @@ class AppSession {
     await p.remove(_kRole);
   }
 
+  /// Returns true if logged in.
   bool get isLoggedIn => accessToken != null && accessToken!.isNotEmpty;
 }

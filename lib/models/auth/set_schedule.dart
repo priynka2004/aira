@@ -1,3 +1,7 @@
+// FILE: models/auth/set_schedule.dart  |  MODEL
+// Request body: set weekly working hours for a day.
+
+/// Model: Set Schedule.
 class SetSchedule {
   final int dayOfWeek;
   final String startTime;
@@ -11,6 +15,7 @@ class SetSchedule {
     this.locationTypeId,
   });
 
+  /// Converts this object to JSON for the API.
   Map<String, dynamic> toJson() => {
     'day_of_week': dayOfWeek,
     'start_time': startTime,

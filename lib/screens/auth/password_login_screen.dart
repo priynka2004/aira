@@ -1,13 +1,19 @@
+// FILE: screens/auth/password_login_screen.dart
+// SCREEN: Login with email + password. Has link to Forgot Password.
+//
+// APIs used:
+//   POST /auth/login/
+
 import 'package:flutter/material.dart';
-import '../../utils/app_feedback.dart';
+import '../../utils/login_error.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/common.dart';
 import '../../models/auth/login_request.dart';
 import '../../utils/service_locator.dart';
+import 'forgot_password_screen.dart';
 import 'post_login_router.dart';
 
-/// POST /auth/login/ — for artists who registered with a password
-/// (via RegisterScreen) instead of using OTP.
+/// SCREEN: Login with email + password. Has link to Forgot Password.
 class PasswordLoginScreen extends StatefulWidget {
   const PasswordLoginScreen({super.key});
 
@@ -15,6 +21,7 @@ class PasswordLoginScreen extends StatefulWidget {
   State<PasswordLoginScreen> createState() => _PasswordLoginScreenState();
 }
 
+/// State of [PasswordLoginScreen] — holds the screen data and logic.
 class _PasswordLoginScreenState extends State<PasswordLoginScreen> {
   final _usernameCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
@@ -22,6 +29,7 @@ class _PasswordLoginScreenState extends State<PasswordLoginScreen> {
   String? _error;
   bool _obscurePassword = true;
 
+  /// Frees controllers / listeners when the screen closes.
   @override
   void dispose() {
     _usernameCtrl.dispose();
@@ -29,9 +37,11 @@ class _PasswordLoginScreenState extends State<PasswordLoginScreen> {
     super.dispose();
   }
 
+  /// Submits the form.
+  /// API: authService.login → POST /auth/login/
   Future<void> _submit() async {
     if (_usernameCtrl.text.trim().isEmpty || _passwordCtrl.text.trim().isEmpty) {
-      setState(() => _error = 'Enter your username/email and password');
+      setState(() => _error = 'Enter Your Username/Email And Password');
       return;
     }
     setState(() {
@@ -46,17 +56,19 @@ class _PasswordLoginScreenState extends State<PasswordLoginScreen> {
       if (!mounted) return;
       await routeAfterLogin(context);
     } catch (e) {
-      setState(() => _error = AppFeedback.friendlyMessage(e));
+      if (mounted) setState(() => _error = loginErrorMessage(e));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
 
+  /// UI piece: field.
   Widget _field(
       String label,
       TextEditingController ctrl, {
         bool obscure = false,
         TextInputType? type,
+        String? hint,
       }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
@@ -86,6 +98,11 @@ class _PasswordLoginScreenState extends State<PasswordLoginScreen> {
               style: AiraText.sans(fontSize: 15),
               decoration: InputDecoration(
                 border: InputBorder.none,
+                hintText: hint,
+                hintStyle: AiraText.sans(
+                  fontSize: 15,
+                  color: AiraColors.charcoalSoft.withOpacity(0.55),
+                ),
                 suffixIcon: obscure
                     ? IconButton(
                   icon: Icon(
@@ -109,35 +126,59 @@ class _PasswordLoginScreenState extends State<PasswordLoginScreen> {
     );
   }
 
+  /// Builds the UI.
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AiraColors.bg,
       body: SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
           padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              GestureDetector(
-                onTap: () => Navigator.of(context).pop(),
-                child: const Icon(Icons.arrow_back, size: 20, color: AiraColors.charcoal),
-              ),
+              SunndariBackChip(onTap: () => Navigator.of(context).pop()),
               const SizedBox(height: 24),
-              Text('Log in with password', style: AiraText.serif(fontSize: 22, fontWeight: FontWeight.w600)),
+              Text('Log In With Password', style: AiraText.serif(fontSize: 22, fontWeight: FontWeight.w600)),
               const SizedBox(height: 24),
-              _field('Username or email', _usernameCtrl),
+              _field('Username Or Email', _usernameCtrl,
+                  type: TextInputType.emailAddress, hint: 'Username Or Email'),
               _field(
                 'Password',
                 _passwordCtrl,
                 obscure: true,
+                hint: 'Enter Your Password',
+              ),
+              Align(
+                alignment: Alignment.centerRight,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  // Navigates to ForgotPasswordScreen
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => ForgotPasswordScreen(initialId: _usernameCtrl.text.trim()),
+                    ),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 14),
+                    child: Text(
+                      'Forgot Password?',
+                      style: AiraText.sans(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w600,
+                        color: AiraColors.roseDeep,
+                      ),
+                    ),
+                  ),
+                ),
               ),
               if (_error != null) ...[
                 Text(_error!, style: AiraText.sans(fontSize: 12.5, color: AiraColors.errorText)),
                 const SizedBox(height: 10),
               ],
               PrimaryButton(
-                label: _loading ? 'Logging in…' : 'Log in',
+                label: _loading ? 'Logging In…' : 'Log In',
                 expand: true,
                 onTap: _loading ? null : _submit,
               ),

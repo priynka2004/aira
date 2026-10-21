@@ -1,3 +1,6 @@
+// FILE: api/local_notification_builder.dart
+// Builds the title/body of local notifications for bookings, chat and help-center events.
+
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/notification/app_notification.dart';
 import '../utils/app_session.dart';
@@ -7,23 +10,7 @@ import 'chat_service.dart';
 import 'help_center_service.dart';
 import 'notification_service.dart';
 
-/// Builds the Notifications screen's list mostly from data the app
-/// already fetches successfully elsewhere (bookings, chat messages, help
-/// center replies), **plus** the real backend notification rows —
-/// specifically so events with no other data source on the client (like
-/// the Booking OTP, which is never returned by any booking GET) still
-/// show up.
-///
-/// `GET /notifications/get_all/` currently always comes back with every
-/// item stuck at `deliveryStatus: "failed"` / `"pending"` and
-/// `failureReason: "FCM not yet configured"` — the backend creates the
-/// notification row (with its real title/message already in it) but
-/// never finishes *pushing* it. That failed-push status doesn't mean the
-/// row's content is invalid, so this builder still reads it — it just
-/// doesn't rely on it alone, since backend coverage of notification
-/// types has been inconsistent (see the booking-lifecycle testing
-/// history). The synthetic on-device items below fill in the gaps for
-/// event types the backend doesn't reliably create rows for at all.
+/// Local Notification Builder.
 class LocalNotificationBuilder {
   static const _readIdsKey = 'local_notif_read_ids';
 
@@ -42,53 +29,37 @@ class LocalNotificationBuilder {
     _notificationService = NotificationService(_apiService);
   }
 
-  // Artist-side copy: statuses the artist didn't just set themselves
-  // (they confirm/complete bookings themselves in-app, so those don't
-  // need a notification) — mainly new requests and customer-initiated
-  // cancellations.
   static const Map<int, _StatusCopy> _statusCopy = {
-    1: _StatusCopy('new_booking_alert', 'New booking request',
-        'You have a new booking request.'),
-    5: _StatusCopy('booking_cancelled', 'Booking cancelled',
-        'A booking was cancelled.'),
-    6: _StatusCopy('booking_no_show', 'Marked as no-show',
-        'A booking was marked as a no-show.'),
+    1: _StatusCopy('new_booking_alert', 'New Booking Request',
+        'You Have A New Booking Request.'),
+    5: _StatusCopy('booking_cancelled', 'Booking Cancelled',
+        'A Booking Was Cancelled.'),
+    6: _StatusCopy('booking_no_show', 'Marked As No-Show',
+        'A Booking Was Marked As A No-Show.'),
   };
 
+  /// Builds the UI.
   Future<List<AppNotification>> build() async {
     final userId = AppSession.instance.userId ?? 0;
     final items = <AppNotification>[];
 
-    // 0) Real backend notification rows — best-effort. This is the ONLY
-    // source for event types the client has no other way to reconstruct
-    // (the Booking OTP above all: it's never returned by any booking GET,
-    // only ever written into a notification's message). A failure here
-    // (or an empty list, if the backend genuinely hasn't created any rows
-    // yet) must not block the synthetic items below — this is additive.
     try {
       final page = await _notificationService.getAllNotifications(limit: 50);
       items.addAll(page.data);
     } catch (_) {
-      // Backend notification list unavailable — fall through to the
-      // synthetic-only feed below rather than failing the whole screen.
     }
-    final realBookingIds = items.map((n) => n.bookingId).whereType<int>().toSet();
-
-    // 1) Booking status changes — from the already-working bookings list.
-    // Deliberately NOT wrapped in try/catch: if this genuinely fails
-    // (network hiccup), the whole build() call should fail and the
-    // caller (which does "best effort, leave existing list as-is" on
-    // error) keeps showing the last good data — instead of us silently
-    // swallowing the error here and returning a much smaller/empty list
-    // that overwrites perfectly good data already on screen.
+    // Paid bookings only (the server filters). Notifications of UNPAID bookings are dropped.
     final bookings = await _bookingService.getAllBookings(limit: 100);
+    try {
+      final unpaid = (await _bookingService.getAllBookings(limit: 100, paymentFilter: 'unpaid'))
+          .map((b) => b.bookingId)
+          .toSet();
+      items.removeWhere((n) => n.bookingId != null && unpaid.contains(n.bookingId));
+    } catch (_) {}
+    final realBookingIds = items.map((n) => n.bookingId).whereType<int>().toSet();
     for (final b in bookings) {
         final copy = _statusCopy[b.statusId as int];
         if (copy == null) continue;
-        // Skip the synthetic entry if a real backend notification already
-        // exists for this booking — avoids showing e.g. "New booking
-        // request" twice (once real, once synthesized) once the backend
-        // reliably creates rows for a given event type.
         if (realBookingIds.contains(b.bookingId)) continue;
         items.add(AppNotification(
           notificationId: _stableId('booking', b.bookingId as int, copy.type),
@@ -108,8 +79,6 @@ class LocalNotificationBuilder {
         ));
       }
 
-    // 2) New chat messages — only for bookings where a conversation can
-    // realistically exist (confirmed / in-progress / completed).
     for (final b in bookings) {
       if (![2, 3, 4].contains(b.statusId as int)) continue;
       try {
@@ -126,7 +95,7 @@ class LocalNotificationBuilder {
             userId: userId,
             bookingId: b.bookingId as int,
             type: 'chat_message',
-            title: 'New message from customer',
+            title: 'New Message From Customer',
             message: m.content,
             isRead: false,
             deliveryStatus: 'local',
@@ -135,12 +104,10 @@ class LocalNotificationBuilder {
           ));
         }
       } catch (_) {
-        // No conversation yet for this booking, or a network hiccup —
-        // skip it, don't fail the whole list over one booking.
+
       }
     }
 
-    // 3) Help Center replies.
     try {
       final convo = await _helpCenterService.getConversation();
       if (convo != null) {
@@ -157,7 +124,7 @@ class LocalNotificationBuilder {
             userId: userId,
             bookingId: null,
             type: 'help_center_reply',
-            title: 'Support replied to your message',
+            title: 'Support Replied To Your Message',
             message: m.content,
             isRead: false,
             deliveryStatus: 'local',
@@ -167,44 +134,66 @@ class LocalNotificationBuilder {
         }
       }
     } catch (_) {
-      // No open conversation — nothing to add.
     }
 
+    final relevant = _onlyArtistRelevant(items);
     final readIds = await _loadReadIds();
-    final withReadState = items
+    final withReadState = relevant
         .map((n) => readIds.contains(n.notificationId) ? n.copyWith(isRead: true) : n)
         .toList();
     withReadState.sort((a, b) => b.createdAt.compareTo(a.createdAt));
     return withReadState;
   }
 
+  /// Types that never help the artist do their work (promotions, tips, generic broadcasts).
+  static const _noiseMarkers = ['promo', 'marketing', 'offer', 'discount', 'campaign', 'newsletter', 'welcome', 'tip', 'general'];
+
+  /// Keeps only what the artist needs to act on, and shows each repeated message only once.
+  List<AppNotification> _onlyArtistRelevant(List<AppNotification> all) {
+    final newestFirst = [...all]..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    final seen = <String>{};
+    final out = <AppNotification>[];
+    for (final n in newestFirst) {
+      final t = n.type.toLowerCase();
+      final isBooking = n.bookingId != null;
+      if (!isBooking && _noiseMarkers.any(t.contains)) continue;
+      if (n.title.trim().isEmpty && n.message.trim().isEmpty) continue;
+      // Same title + message repeated (e.g. "Payout account updated" saved twice) → keep only the latest.
+      final key = isBooking ? '${n.bookingId}|$t|${n.title}' : '$t|${n.title.trim().toLowerCase()}|${n.message.trim().toLowerCase()}';
+      if (!seen.add(key)) continue;
+      out.add(n);
+    }
+    return out;
+  }
+
+  /// Marks read.
   Future<void> markRead(int notificationId) async {
     final ids = await _loadReadIds();
     ids.add(notificationId);
     await _saveReadIds(ids);
   }
 
+  /// Marks all read.
   Future<void> markAllRead(List<AppNotification> current) async {
     final ids = await _loadReadIds();
     ids.addAll(current.map((n) => n.notificationId));
     await _saveReadIds(ids);
   }
 
+  /// Loads read IDs.
   Future<Set<int>> _loadReadIds() async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getStringList(_readIdsKey) ?? [];
     return raw.map((e) => int.tryParse(e) ?? 0).toSet();
   }
 
+  /// Saves read IDs.
   Future<void> _saveReadIds(Set<int> ids) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setStringList(_readIdsKey, ids.map((e) => e.toString()).toList());
   }
 
-  /// Deterministic negative id so the same underlying event always maps
-  /// to the same synthetic notificationId across rebuilds (needed for
-  /// mark-as-read to stick, and to avoid clashing with any real
-  /// server-side notificationId which is always positive).
+  /// Stable id.
   int _stableId(String source, int entityId, String type) {
     final key = '$source:$entityId:$type';
     final hash = key.hashCode & 0x7fffffff;
@@ -212,6 +201,7 @@ class LocalNotificationBuilder {
   }
 }
 
+/// Status Copy.
 class _StatusCopy {
   final String type;
   final String title;

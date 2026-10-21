@@ -1,163 +1,322 @@
+// FILE: api/api_service.dart
+// Core HTTP client: GET / POST / PUT / DELETE / multipart, auth header, auto token-refresh on 401, error mapping.
+// Every other *_service.dart uses this class.
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import '../utils/api_logger.dart';
 import '../utils/app_session.dart';
 import 'api_endpoints.dart';
 
+/// A file to upload in a multipart request.
+class UploadFile {
+  final String field;
+  final String path;
+  final String? filename;
+  const UploadFile(this.field, this.path, {this.filename});
+}
+
+/// Core HTTP client used by every service.
 class ApiService {
   static const String baseUrl = ApiEndpoints.baseUrl;
 
-  String? get _token => AppSession.instance.accessToken;
+  static const _requestTimeout = Duration(seconds: 20);
 
+  static const _uploadTimeout = Duration(seconds: 120);
+
+  /// Called when the saved login can no longer be used (access token dead
+  /// and refresh failed — e.g. the artist logged in on another phone, since
+  /// only one session per user is allowed). main.dart sets it to send the
+  /// artist back to the login screen instead of leaving them stuck.
+  static VoidCallback? onSessionExpired;
+  static DateTime? _lastExpiredNotice;
+
+  static void _notifySessionExpired() {
+    final now = DateTime.now();
+    final last = _lastExpiredNotice;
+    if (last != null && now.difference(last) < const Duration(seconds: 3)) return;
+    _lastExpiredNotice = now;
+    onSessionExpired?.call();
+  }
+
+  /// Current access token from the saved session.
+  String? get _token => AppSession.instance.accessToken;
+  /// Returns true if it has token.
+  bool get _hasToken => _token != null && _token!.isNotEmpty;
+
+  /// Default headers: JSON + Bearer token.
   Map<String, String> get _headers {
     final h = {'Content-Type': 'application/json', 'Accept': 'application/json'};
-    if (_token != null && _token!.isNotEmpty) {
-      h['Authorization'] = 'Bearer $_token';
-    }
+    if (_hasToken) h['Authorization'] = 'Bearer $_token';
     return h;
   }
 
-  // Coalesces concurrent 401s into a single in-flight refresh call.
   Future<bool>? _refreshInFlight;
 
-  // GET
+  /// Joins base URL + endpoint + query params.
+  Uri _buildUri(String endpoint, Map<String, dynamic>? queryParameters) {
+    final uri = Uri.parse('$baseUrl$endpoint');
+    if (queryParameters == null || queryParameters.isEmpty) return uri;
+    return uri.replace(queryParameters: {
+      for (final e in queryParameters.entries)
+        if (e.value != null) e.key: e.value.toString(),
+    });
+  }
+
+  /// GET request (adds auth header, retries after token refresh on 401).
   Future<http.Response> get(String endpoint,
-      {Map<String, dynamic>? queryParameters}) async {
-    final uri = Uri.parse('$baseUrl$endpoint').replace(
-      queryParameters:
-      queryParameters?.map((k, v) => MapEntry(k, v.toString())),
+      {Map<String, dynamic>? queryParameters}) {
+    final uri = _buildUri(endpoint, queryParameters);
+    return _sendWithRetry('GET', uri, () => http.get(uri, headers: _headers));
+  }
+
+  /// POST request with JSON body.
+  Future<http.Response> post(String endpoint, {dynamic data}) {
+    final uri = _buildUri(endpoint, null);
+    return _sendWithRetry(
+      'POST',
+      uri,
+          () => http.post(uri,
+          headers: _headers, body: data != null ? jsonEncode(data) : null),
+      body: data,
     );
-    return _sendWithRetry(() {
-      _logRequest('GET', uri);
-      return http.get(uri, headers: _headers);
-    });
   }
 
-  // POST
-  Future<http.Response> post(String endpoint, {dynamic data}) async {
-    final uri = Uri.parse('$baseUrl$endpoint');
-    return _sendWithRetry(() {
-      _logRequest('POST', uri, data);
-      return http.post(uri,
-          headers: _headers, body: data != null ? jsonEncode(data) : null);
-    });
+  /// PUT request with JSON body.
+  Future<http.Response> put(String endpoint, {dynamic data}) {
+    final uri = _buildUri(endpoint, null);
+    return _sendWithRetry(
+      'PUT',
+      uri,
+          () => http.put(uri,
+          headers: _headers, body: data != null ? jsonEncode(data) : null),
+      body: data,
+    );
   }
 
-  // PUT
-  Future<http.Response> put(String endpoint, {dynamic data}) async {
-    final uri = Uri.parse('$baseUrl$endpoint');
-    return _sendWithRetry(() {
-      _logRequest('PUT', uri, data);
-      return http.put(uri,
-          headers: _headers, body: data != null ? jsonEncode(data) : null);
-    });
-  }
-
-  // DELETE
+  /// DELETE request.
   Future<http.Response> delete(String endpoint,
-      {Map<String, dynamic>? queryParameters}) async {
-    final uri = Uri.parse('$baseUrl$endpoint').replace(
-      queryParameters:
-      queryParameters?.map((k, v) => MapEntry(k, v.toString())),
-    );
-    return _sendWithRetry(() {
-      _logRequest('DELETE', uri);
-      return http.delete(uri, headers: _headers);
-    });
+      {Map<String, dynamic>? queryParameters}) {
+    final uri = _buildUri(endpoint, queryParameters);
+    return _sendWithRetry('DELETE', uri, () => http.delete(uri, headers: _headers));
   }
 
-  /// Runs [doRequest]; on a 401 (with a refresh token available) calls
-  /// POST /auth/token/refresh/ once and retries the original request
-  /// exactly once with the new access token.
+  /// POST multipart/form-data (file upload with text fields).
+  Future<http.Response> postMultipart(
+      String endpoint, {
+        Map<String, String> fields = const {},
+        List<UploadFile> files = const [],
+      }) {
+    final uri = _buildUri(endpoint, null);
+    return _sendWithRetry(
+      'POST(multipart)',
+      uri,
+          () async {
+        final request = http.MultipartRequest('POST', uri);
+        request.headers['Accept'] = 'application/json';
+        if (_hasToken) request.headers['Authorization'] = 'Bearer $_token';
+        request.fields.addAll(fields);
+        for (final f in files) {
+          request.files.add(
+              await http.MultipartFile.fromPath(f.field, f.path, filename: f.filename));
+        }
+        final streamed = await request.send();
+        return http.Response.fromStream(streamed);
+      },
+      fields: fields,
+      files: [
+        for (final f in files) '${f.field}=${f.filename ?? f.path.split('/').last}',
+      ],
+      timeout: _uploadTimeout,
+    );
+  }
+
+  /// PUT with multipart/form-data (used by PUT /artists/packages/photo/upload/).
+  Future<http.Response> putMultipart(
+      String endpoint, {
+        Map<String, String> fields = const {},
+        List<UploadFile> files = const [],
+      }) {
+    final uri = _buildUri(endpoint, null);
+    return _sendWithRetry(
+      'PUT(multipart)',
+      uri,
+          () async {
+        final request = http.MultipartRequest('PUT', uri);
+        request.headers['Accept'] = 'application/json';
+        if (_hasToken) request.headers['Authorization'] = 'Bearer $_token';
+        request.fields.addAll(fields);
+        for (final f in files) {
+          request.files.add(
+              await http.MultipartFile.fromPath(f.field, f.path, filename: f.filename));
+        }
+        final streamed = await request.send();
+        return http.Response.fromStream(streamed);
+      },
+      fields: fields,
+      files: [
+        for (final f in files) '${f.field}=${f.filename ?? f.path.split('/').last}',
+      ],
+      timeout: _uploadTimeout,
+    );
+  }
+
+  /// Sends the request; on 401 refreshes the token once and retries.
   Future<http.Response> _sendWithRetry(
-      Future<http.Response> Function() doRequest) async {
-    var response = await _safeSend(doRequest);
+      String method,
+      Uri uri,
+      Future<http.Response> Function() doRequest, {
+        dynamic body,
+        Map<String, String>? fields,
+        List<String>? files,
+        Duration timeout = _requestTimeout,
+      }) async {
+
+    final sentAuth = _hasToken;
+
+    var response = await _attempt(method, uri, doRequest, timeout,
+        body: body, fields: fields, files: files);
 
     if (response.statusCode == 401 &&
         (AppSession.instance.refreshToken?.isNotEmpty ?? false)) {
       final refreshed = await _refreshToken();
       if (refreshed) {
-        // _headers is recomputed on every call, so the retry picks up
-        // the freshly-saved access token automatically.
-        response = await _safeSend(doRequest);
+        response = await _attempt(method, uri, doRequest, timeout,
+            body: body, fields: fields, files: files, retry: true);
       }
     }
 
-    return _handle(response);
+    return _handle(response, sentAuth: sentAuth);
   }
 
-  /// Runs [doRequest] with a timeout and converts low-level failures
-  /// (no internet, DNS failure, connection reset, server unreachable,
-  /// slow/hung request) into a single clean, user-readable [Exception]
-  /// instead of letting a raw SocketException/ClientException/
-  /// TimeoutException string reach the UI.
-  static const _requestTimeout = Duration(seconds: 20);
-
-  Future<http.Response> _safeSend(
-      Future<http.Response> Function() doRequest) async {
+  Future<http.Response> _attempt(
+      String method,
+      Uri uri,
+      Future<http.Response> Function() doRequest,
+      Duration timeout, {
+        dynamic body,
+        Map<String, String>? fields,
+        List<String>? files,
+        bool retry = false,
+      }) async {
+    final id = ApiLog.nextId();
+    final sw = Stopwatch()..start();
+    ApiLog.request(id, method, uri,
+        auth: _hasToken, retry: retry, body: body, fields: fields, files: files);
     try {
-      return await doRequest().timeout(_requestTimeout);
-    } on TimeoutException catch (e) {
-      if (kDebugMode) debugPrint('[ApiService] timeout: $e');
-      throw Exception(
-          'The request is taking longer than expected. Please check your connection and try again.');
-    } on SocketException catch (e) {
-      if (kDebugMode) debugPrint('[ApiService] socket error: $e');
-      throw Exception(
-          'No internet connection. Please check your network and try again.');
-    } on HandshakeException catch (e) {
-      if (kDebugMode) debugPrint('[ApiService] TLS handshake error: $e');
-      throw Exception('A secure connection could not be established. Please try again.');
-    } on http.ClientException catch (e) {
-      if (kDebugMode) debugPrint('[ApiService] client error: $e');
-      throw Exception(
-          'Could not reach the server. Please check your connection and try again.');
-    } on FormatException catch (e) {
-      if (kDebugMode) debugPrint('[ApiService] format error: $e');
-      throw Exception('Received an unexpected response from the server.');
+      final r = _withUtf8(await _safeSend(doRequest, timeout));
+      ApiLog.response(id, method, uri, r, sw.elapsed);
+      return r;
     } catch (e) {
-      // Anything already an Exception with a clean message (e.g. rethrown
-      // from _handle on a retry) passes straight through unchanged.
-      if (e is Exception) rethrow;
-      if (kDebugMode) debugPrint('[ApiService] unexpected error: $e');
-      throw Exception('Something went wrong. Please try again.');
+      ApiLog.error(id, method, uri, e, sw.elapsed);
+      rethrow;
     }
   }
 
+  /// Safely runs send.
+  Future<http.Response> _safeSend(
+      Future<http.Response> Function() doRequest, Duration timeout) async {
+    try {
+      return await doRequest().timeout(timeout);
+    } catch (e) {
+      if (kDebugMode) debugPrint('[ApiService] network error (${e.runtimeType}): $e');
+      throw _networkException(e);
+    }
+  }
+
+  /// Network exception.
+  Exception _networkException(Object e) {
+    if (e is TimeoutException) {
+      return Exception(
+          'The Server Is Slow To Respond. Please Check Your Internet And Try Again.');
+    }
+    if (e is SocketException) {
+      return Exception(
+          'No Internet Connection. Please Turn On Mobile Data Or Wi-Fi And Try Again.');
+    }
+    if (e is HandshakeException) {
+      return Exception('Secure Connection Failed. Please Check Your Date, Time And Internet, Then Try Again.');
+    }
+    if (e is http.ClientException) {
+      return Exception(
+          'Cannot Reach Sunndari Right Now. Please Check Your Internet And Try Again.');
+    }
+    if (e is FormatException) {
+      return Exception('The Server Sent An Unexpected Reply. Please Try Again In A Moment.');
+    }
+    if (e is Exception) return e;
+    return Exception('Could Not Complete The Request. Please Check Your Internet And Try Again.');
+  }
+
+  /// With utf8.
+  http.Response _withUtf8(http.Response r) {
+    final ct = r.headers['content-type'] ?? '';
+    final lower = ct.toLowerCase();
+    if (lower.contains('charset')) return r;
+    final textual = lower.isEmpty || lower.contains('json') || lower.contains('text');
+    if (!textual) return r;
+    final headers = Map<String, String>.from(r.headers)
+      ..['content-type'] = ct.isEmpty ? 'application/json; charset=utf-8' : '$ct; charset=utf-8';
+    return http.Response.bytes(
+      r.bodyBytes,
+      r.statusCode,
+      request: r.request,
+      headers: headers,
+      isRedirect: r.isRedirect,
+      persistentConnection: r.persistentConnection,
+      reasonPhrase: r.reasonPhrase,
+    );
+  }
+
+  /// Refreshes the access token. API: POST /auth/token/refresh/
   Future<bool> _refreshToken() {
     return _refreshInFlight ??= _doRefreshToken().whenComplete(() {
       _refreshInFlight = null;
     });
   }
 
+  /// Does the actual refresh call. API: POST /auth/token/refresh/
   Future<bool> _doRefreshToken() async {
     final refreshToken = AppSession.instance.refreshToken;
     if (refreshToken == null || refreshToken.isEmpty) return false;
 
+    final uri = Uri.parse('$baseUrl${ApiEndpoints.authTokenRefresh}');
+    final id = ApiLog.nextId();
+    final sw = Stopwatch()..start();
+    const tag = 'API/refresh';
+    ApiLog.request(id, 'POST', uri, tag: tag, body: {'refresh_token': refreshToken});
+
+    final http.Response response;
     try {
-      final uri = Uri.parse('$baseUrl${ApiEndpoints.authTokenRefresh}');
-      _logRequest('POST', uri, {'refresh_token': refreshToken});
-      final response = await http.post(
+      response = _withUtf8(await http
+          .post(
         uri,
         headers: const {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
         },
         body: jsonEncode({'refresh_token': refreshToken}),
-      );
+      )
+          .timeout(_requestTimeout));
+    } catch (e) {
+      ApiLog.error(id, 'POST', uri, e, sw.elapsed, tag: tag);
+      throw _networkException(e);
+    }
+    ApiLog.response(id, 'POST', uri, response, sw.elapsed, tag: tag);
 
-      if (kDebugMode) {
-        debugPrint('[ApiService] token-refresh <- ${response.statusCode} '
-            '| ${response.body}');
-      }
+    if (response.statusCode >= 500) {
+      throw Exception('Sunndari Server Is Having Trouble Right Now. Please Try Again In A Few Minutes.');
+    }
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      AppSession.instance.clear();
+      _notifySessionExpired();
+      return false;
+    }
 
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        AppSession.instance.clear();
-        return false;
-      }
-
+    try {
       Map<String, dynamic> j = jsonDecode(response.body) as Map<String, dynamic>;
       for (final key in ['data', 'result']) {
         final v = j[key];
@@ -182,6 +341,7 @@ class ApiService {
       final newRefresh = findToken(['refresh_token', 'refresh', 'refreshToken']);
 
       if (newAccess.isEmpty) {
+        ApiLog.info('ApiService', 'token-refresh: no access token found in response');
         AppSession.instance.clear();
         return false;
       }
@@ -197,67 +357,115 @@ class ApiService {
       );
       return true;
     } catch (e) {
-      if (kDebugMode) debugPrint('[ApiService] token-refresh failed: $e');
+      ApiLog.info('ApiService', 'token-refresh: could not parse response: $e');
       return false;
     }
   }
 
-  void _logRequest(String method, Uri uri, [dynamic body]) {
-    if (kDebugMode) {
-      final hasAuth = _headers.containsKey('Authorization');
-      debugPrint('[ApiService] $method $uri | auth=$hasAuth'
-          '${body != null ? ' | body=${jsonEncode(body)}' : ''}');
-    }
-  }
-
-  http.Response _handle(http.Response response) {
-    if (kDebugMode) {
-      debugPrint('[ApiService] <- ${response.statusCode} ${response.request?.url} '
-          '| ${response.body}');
-    }
-    if (response.statusCode == 401) {
+  http.Response _handle(http.Response response, {required bool sentAuth}) {
+    if (response.statusCode == 401 && sentAuth) {
       AppSession.instance.clear();
-      throw Exception('Session expired. Please login again.');
+      _notifySessionExpired();
+      throw Exception('Session Expired. Please Login Again.');
     }
-    if (response.statusCode >= 500) {
-      if (kDebugMode) {
-        debugPrint('[ApiService] server error ${response.statusCode}: ${response.body}');
-      }
-      throw Exception('Something went wrong on our end. Please try again shortly.');
+    // Messages that tell the artist nothing — replaced by a reason based on the status code.
+    bool generic(String m) {
+      final t = m.toLowerCase();
+      return t.contains('something went wrong') || t.contains('internal server error') ||
+          t.contains('an error occurred') || t.contains('bad gateway') || t.contains('<html');
     }
-    if (response.statusCode >= 400) {
-      String msg = 'Something went wrong. Please try again.';
+    String? bodyMessage() {
       try {
         final body = jsonDecode(response.body);
-        // Backend has been observed sending the real reason under several
-        // different keys depending on the endpoint — `detail` (DRF-style
-        // auth errors), `message` (most endpoints' top-level wrapper), and
-        // `error` as a list of strings (this API's own custom ValueError
-        // responses, e.g. {"error":["Conversation not found"]} or
-        // {"error":["Updating records is not allowed"]}). Only checking
-        // `detail`/`message` silently dropped every `error`-only response
-        // and fell back to the generic "Something went wrong" even though
-        // the backend had already sent the specific reason.
+        if (body is Map) {
+          final err = body['error'];
+          final c = (err is List && err.isNotEmpty) ? err.first : (body['detail'] ?? body['message']);
+          if (c is String && c.trim().isNotEmpty && !generic(c)) return c.trim();
+        }
+      } catch (_) {}
+      return null;
+    }
+    switch (response.statusCode) {
+      case 413:
+        throw Exception('This File Is Too Large. Please Choose A Smaller Photo (Under 5 MB) And Try Again.');
+      case 415:
+        throw Exception('This File Type Is Not Supported. Please Upload A JPG Or PNG Photo.');
+      case 408:
+      case 504:
+        throw Exception('The Server Took Too Long To Respond. Please Check Your Internet And Try Again.');
+      case 429:
+        throw Exception('Too Many Attempts. Please Wait A Minute And Try Again.');
+      case 502:
+      case 503:
+        final otpMsg = bodyMessage();
+        if (otpMsg != null && otpMsg.toLowerCase().contains('otp')) throw Exception(otpMsg); // "Unable to send OTP right now, please try again"
+        throw Exception('Sunndari Is Being Updated Or Is Busy Right Now. Please Try Again In A Few Minutes.');
+    }
+    if (response.statusCode >= 500) {
+      final m = bodyMessage();
+      if (m != null) throw Exception(m);
+      throw Exception('Sunndari Server Had A Problem (Error ${response.statusCode}). Please Try Again In A Few Minutes.');
+    }
+    if (response.statusCode == 403) {
+      throw Exception(bodyMessage() ?? "You Don't Have Permission To Do This. Please Contact Support If You Think This Is A Mistake.");
+    }
+    if (response.statusCode >= 400) {
+      if (kDebugMode && (response.statusCode == 404 || response.statusCode == 405)) {
+        // Makes missing / wrong-method endpoints easy to spot (users still see a friendly message).
+        debugPrint('[ApiService] ${response.statusCode} ${response.request?.method} ${response.request?.url.path} '
+            '— Endpoint Missing Or Method Not Allowed');
+      }
+      String msg = 'Could Not Complete The Request (Error ${response.statusCode}). Please Try Again.';
+      try {
+        final body = jsonDecode(response.body);
         dynamic candidate;
         if (body is Map) {
-          candidate = body['detail'] ?? body['message'];
-          if (candidate == null) {
-            final err = body['error'] ?? body['errors'];
-            if (err is List && err.isNotEmpty) {
-              candidate = err.first;
-            } else if (err is String) {
-              candidate = err;
-            }
+          final err = body['error'] ?? body['errors'];
+          if (err is Map && err.isNotEmpty) {
+            // Field validation: {"message": "Validation error", "error": {"city": ["This field may not be blank."]}}
+            final first = err.values.first;
+            final text = (first is List && first.isNotEmpty) ? first.first : first;
+            if (text != null) candidate = ApiService.friendlyFieldError(err.keys.first.toString(), text.toString());
           }
+          candidate ??= body['detail'];
+          // Field validation can also be error: [ {"city": ["This field may not be blank."]} ] (error[0] is a map).
+          if (candidate == null && err is List && err.isNotEmpty && err.first is Map && (err.first as Map).isNotEmpty) {
+            final m = err.first as Map;
+            final first = m.values.first;
+            final text = (first is List && first.isNotEmpty) ? first.first : first;
+            if (text != null) candidate = ApiService.friendlyFieldError(m.keys.first.toString(), text.toString());
+          }
+          // Business-rule errors carry the useful text in error[0]; message is generic ("Value Error ...").
+          if (candidate == null && err is List && err.isNotEmpty) candidate = err.first;
+          if (candidate == null && err is String) candidate = err;
+          candidate ??= body['message'];
         }
         if (candidate is String && candidate.trim().isNotEmpty) {
           msg = candidate;
         }
       } catch (e) {
-        if (kDebugMode) debugPrint('[ApiService] failed to parse error body: $e');
+        ApiLog.info('ApiService', 'failed to parse error body: $e');
       }
       throw Exception(msg);
     }
     return response;
+  }
+
+  /// Turns a raw field error (`pan_number` + "This field may not be blank.") into a clear sentence.
+  static String friendlyFieldError(String field, String message) {
+    final f = field.toLowerCase();
+    final m = message.toLowerCase();
+    if (f.contains('pan')) return 'Please Enter A Valid PAN Number.';
+    if (f.contains('ifsc')) return 'Please Enter A Valid IFSC Code.';
+    if (f.contains('date_of_birth') || f.contains('dob')) {
+      return m.contains('18') ? 'You Must Be At Least 18 Years Old.' : 'Please Enter A Valid Date Of Birth.';
+    }
+    if (f.contains('pin')) return 'Please Enter A Valid 6-digit Pincode.';
+    final label = field.replaceAll('_', ' ').trim().toLowerCase();
+    if (m.contains('blank') || m.contains('required') || m.contains('null') || m.contains('empty')) {
+      return 'Please Enter/Select The Required Information${label.isEmpty ? '' : ' ($label)'}.';
+    }
+    if (m.contains('already')) return 'This $label Is Already In Use.';
+    return 'Please Enter A Valid $label.';
   }
 }

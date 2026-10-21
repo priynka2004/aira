@@ -1,18 +1,13 @@
+// FILE: screens/recommend_product_screen.dart
+// SCREEN: Recommend Product — pick beauty products for a client and share the list (local catalog).
+
 import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 import '../theme/tokens.dart';
 import '../widgets/common.dart';
 import '../utils/app_feedback.dart';
 
-/// Landing-page "Recommend Product" flow: browse a curated beauty-product
-/// catalog by category, pick a few for a client, add a personal note, and
-/// share the recommendation list with them.
-///
-/// There's no product-catalog endpoint in the Sunndari API, so this uses a
-/// hand-picked reference catalog (real, well-known product lines rather
-/// than placeholder text) — swap [_catalog] for a live call once a
-/// products endpoint exists; nothing else about this screen would need to
-/// change.
+/// SCREEN: Recommend Product — pick beauty products for a client and share the list (local catalog).
 class RecommendProductScreen extends StatefulWidget {
   const RecommendProductScreen({super.key});
 
@@ -20,6 +15,7 @@ class RecommendProductScreen extends StatefulWidget {
   State<RecommendProductScreen> createState() => _RecommendProductScreenState();
 }
 
+/// Product.
 class _Product {
   final String name;
   final String brand;
@@ -28,28 +24,30 @@ class _Product {
   const _Product(this.name, this.brand, this.category, this.forConcern);
 }
 
+/// State of [RecommendProductScreen] — holds the screen data and logic.
 class _RecommendProductScreenState extends State<RecommendProductScreen> {
   static const _catalog = [
-    _Product('Hydrating Primer', 'Lakmé', 'Skin Prep', 'Dry skin, dull look'),
-    _Product('Mattifying Primer', 'MAC', 'Skin Prep', 'Oily skin, long wear'),
-    _Product('Foundation Stick', 'NARS', 'Base', 'Even coverage, glow finish'),
-    _Product('Cushion Foundation', 'Lakmé', 'Base', 'Light everyday coverage'),
-    _Product('Setting Powder', 'Laura Mercier', 'Base', 'Oily T-zone, humidity'),
-    _Product('Concealer', 'NARS', 'Base', 'Under-eye, blemish coverage'),
-    _Product('Eyeshadow Palette', 'Huda Beauty', 'Eyes', 'Bridal, festive looks'),
-    _Product('Kohl Eyeliner', 'Lakmé', 'Eyes', 'Everyday definition'),
-    _Product('Waterproof Mascara', 'Maybelline', 'Eyes', 'Long ceremonies, tears-proof'),
-    _Product('Matte Lipstick', 'MAC', 'Lips', 'Bold party look'),
-    _Product('Tinted Lip Balm', 'Nykaa', 'Lips', 'Natural everyday look'),
-    _Product('Setting Spray', 'Urban Decay', 'Finish', 'All-day, humidity-proof wear'),
-    _Product('Highlighter', 'Fenty Beauty', 'Finish', 'Glow for photos'),
-    _Product('Makeup Remover Wipes', 'Simple', 'Aftercare', 'Gentle end-of-day removal'),
+    _Product('Hydrating Primer', 'Lakmé', 'Skin Prep', 'Dry Skin, Dull Look'),
+    _Product('Mattifying Primer', 'MAC', 'Skin Prep', 'Oily Skin, Long Wear'),
+    _Product('Foundation Stick', 'NARS', 'Base', 'Even Coverage, Glow Finish'),
+    _Product('Cushion Foundation', 'Lakmé', 'Base', 'Light Everyday Coverage'),
+    _Product('Setting Powder', 'Laura Mercier', 'Base', 'Oily T-Zone, Humidity'),
+    _Product('Concealer', 'NARS', 'Base', 'Under-Eye, Blemish Coverage'),
+    _Product('Eyeshadow Palette', 'Huda Beauty', 'Eyes', 'Bridal, Festive Looks'),
+    _Product('Kohl Eyeliner', 'Lakmé', 'Eyes', 'Everyday Definition'),
+    _Product('Waterproof Mascara', 'Maybelline', 'Eyes', 'Long Ceremonies, Tears-Proof'),
+    _Product('Matte Lipstick', 'MAC', 'Lips', 'Bold Party Look'),
+    _Product('Tinted Lip Balm', 'Nykaa', 'Lips', 'Natural Everyday Look'),
+    _Product('Setting Spray', 'Urban Decay', 'Finish', 'All-Day, Humidity-Proof Wear'),
+    _Product('Highlighter', 'Fenty Beauty', 'Finish', 'Glow For Photos'),
+    _Product('Makeup Remover Wipes', 'Simple', 'Aftercare', 'Gentle End-Of-Day Removal'),
   ];
 
   String? _categoryFilter;
   final Set<String> _selected = {};
   final _noteController = TextEditingController();
 
+  /// Frees controllers / listeners when the screen closes.
   @override
   void dispose() {
     _noteController.dispose();
@@ -61,15 +59,16 @@ class _RecommendProductScreenState extends State<RecommendProductScreen> {
   List<_Product> get _visible =>
       _categoryFilter == null ? _catalog : _catalog.where((p) => p.category == _categoryFilter).toList();
 
+  /// Shares via the share sheet.
   Future<void> _share() async {
     if (_selected.isEmpty) {
-      AppFeedback.showWarning(context, 'Pick at least one product first');
+      AppFeedback.showWarning(context, 'Pick At Least One Product First');
       return;
     }
     final picked = _catalog.where((p) => _selected.contains(p.name)).toList();
-    final buffer = StringBuffer('✨ Here are my product picks for you:\n\n');
+    final buffer = StringBuffer('✨ Here Are My Product Picks For You:\n\n');
     for (final p in picked) {
-      buffer.writeln('• ${p.name} (${p.brand}) — great for ${p.forConcern}');
+      buffer.writeln('• ${p.name} (${p.brand}) — Great For ${p.forConcern}');
     }
     if (_noteController.text.trim().isNotEmpty) {
       buffer.writeln('\n${_noteController.text.trim()}');
@@ -78,6 +77,7 @@ class _RecommendProductScreenState extends State<RecommendProductScreen> {
     await Share.share(buffer.toString());
   }
 
+  /// Builds the UI.
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -87,17 +87,15 @@ class _RecommendProductScreenState extends State<RecommendProductScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: SunndariAppBar(onBack: () => Navigator.of(context).pop()),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
               child: Row(
                 children: [
-                  GestureDetector(
-                    onTap: () => Navigator.of(context).pop(),
-                    child: const Icon(Icons.arrow_back, size: 20, color: AiraColors.charcoal),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(child: Text('Recommend Product', style: AiraText.serif(fontSize: 19, fontWeight: FontWeight.w600))),
-                  if (_selected.isNotEmpty)
-                    AiraPill(label: '${_selected.length} selected', active: true),
+                  const Expanded(child: SunndariPageHeading(title: 'Recommend Product', subtitle: 'Pick Products To Suggest To Your Client.')),
+                  if (_selected.isNotEmpty) AiraPill(label: '${_selected.length} selected', active: true),
                 ],
               ),
             ),
@@ -145,7 +143,7 @@ class _RecommendProductScreenState extends State<RecommendProductScreen> {
                               Text('${p.name} · ${p.brand}',
                                   style: AiraText.sans(fontSize: 13.5, fontWeight: FontWeight.w600)),
                               const SizedBox(height: 2),
-                              Text('Best for: ${p.forConcern}',
+                              Text('Best For: ${p.forConcern}',
                                   style: AiraText.sans(fontSize: 12, color: AiraColors.charcoalSoft)),
                             ],
                           ),
@@ -170,13 +168,13 @@ class _RecommendProductScreenState extends State<RecommendProductScreen> {
                       style: AiraText.sans(fontSize: 13),
                       decoration: InputDecoration(
                         border: InputBorder.none,
-                        hintText: 'Add a personal note for your client (optional)',
+                        hintText: 'Add A Personal Note For Your Client (Optional)',
                         hintStyle: AiraText.sans(fontSize: 12.5, color: AiraColors.charcoalSoft),
                       ),
                     ),
                   ),
                   const SizedBox(height: 12),
-                  PrimaryButton(label: 'Share with Client', expand: true, onTap: _share),
+                  PrimaryButton(label: 'Share With Client', expand: true, onTap: _share),
                 ],
               ),
             ),
@@ -186,6 +184,7 @@ class _RecommendProductScreenState extends State<RecommendProductScreen> {
     );
   }
 
+  /// UI piece: category chip.
   Widget _categoryChip(String? value, String label) {
     final selected = _categoryFilter == value;
     return Padding(

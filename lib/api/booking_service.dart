@@ -1,8 +1,12 @@
+// FILE: api/booking_service.dart
+// Artist bookings APIs: get one booking, list bookings, update booking status.
+
 import 'dart:convert';
 import '../models/booking/booking.dart';
 import 'api_endpoints.dart';
 import 'api_service.dart';
 
+/// Booking Service — API/data layer.
 class BookingService {
   final ApiService _apiService;
   BookingService(this._apiService);
@@ -14,6 +18,7 @@ class BookingService {
         : json;
   }
 
+  /// Parses booking list.
   List<Booking> _parseBookingList(dynamic json) {
     final raw = json is Map ? (json['data'] ?? json) : json;
     final list = raw is List
@@ -22,17 +27,26 @@ class BookingService {
     return list.map((e) => Booking.fromJson(e as Map<String, dynamic>)).toList();
   }
 
-  /// GET /artists/bookings/get/?booking_id=
-  Future<Booking> getBooking(int bookingId) async {
+  /// Gets booking.
+  /// API: GET /artists/bookings/get/
+  /// [paidOnly] (default true): sends filter_key=paymentStatus&filter_value=paid — an unpaid booking
+  /// answers 400 "Booking not found", so the artist never sees it.
+  Future<Booking> getBooking(int bookingId, {bool paidOnly = true}) async {
     final response = await _apiService.get(
       ApiEndpoints.artistBookingsGet,
-      queryParameters: {'booking_id': bookingId.toString()},
+      queryParameters: {
+        'booking_id': bookingId.toString(),
+        if (paidOnly) ...{'filter_key': 'paymentStatus', 'filter_value': 'paid'},
+      },
     );
     return Booking.fromJson(_unwrap(response.body));
   }
 
-  /// GET /artists/bookings/get_all/
+  /// Gets all bookings.
+  /// API: GET /artists/bookings/get_all/
+  /// [paymentFilter]: 'paid' (default — the artist only ever sees paid bookings) or 'unpaid'.
   Future<List<Booking>> getAllBookings({
+    String paymentFilter = 'paid',
     String? filterKey,
     String? filterValue,
     int pageNum = 1,
@@ -43,6 +57,13 @@ class BookingService {
       queryParameters: {
         'page_num': pageNum.toString(),
         'limit': limit.toString(),
+        if (filterKey != null && filterValue != null) ...{
+          'filter_key': filterKey,
+          'filter_value': filterValue,
+        } else ...{
+          'filter_key': 'paymentStatus',
+          'filter_value': paymentFilter,
+        },
       },
     );
 
@@ -51,7 +72,8 @@ class BookingService {
     return bookings;
   }
 
-  /// PUT /artists/bookings/update_status/
+  /// Updates booking status.
+  /// API: PUT /artists/bookings/update_status/
   Future<Booking> updateBookingStatus(
     int bookingId,
     BookingStatusEnum status, {

@@ -1,18 +1,22 @@
-import 'package:flutter/material.dart';
-import '../../utils/app_feedback.dart';
-import 'package:google_sign_in/google_sign_in.dart';
-import '../../theme/tokens.dart';
-import '../../widgets/common.dart';
-import '../../models/auth/phone_otp_request.dart';
-import '../../models/auth/email_otp_request.dart';
-import '../../models/auth/google_auth.dart';
-import '../../models/enums/role_enum.dart';
-import '../../utils/service_locator.dart';
-import 'otp_screen.dart';
-import 'register_screen.dart';
-import 'post_login_router.dart';
-import 'password_login_screen.dart';
+// FILE: screens/auth/login_screen.dart
+// SCREEN: Login — mobile + password sign in, OTP (Sunndari code) sign in, and onboarding for new artists.
+//
+// APIs used:
+//   POST /auth/login/
 
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import '../../models/auth/login_request.dart';
+import '../../theme/tokens.dart';
+import '../../utils/login_error.dart';
+import '../../utils/service_locator.dart';
+import '../../widgets/common.dart';
+import 'about_screen.dart';
+import 'forgot_password_screen.dart';
+import 'post_login_router.dart';
+import 'register_screen.dart';
+
+/// SCREEN: Login
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
@@ -21,378 +25,203 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  String _mode = 'phone';
-  final _phoneCtrl = TextEditingController();
-  final _emailCtrl = TextEditingController();
-  bool _loadingOtp = false;
-  bool _loadingGoogle = false;
+  final _idCtrl = TextEditingController();
+  final _passwordCtrl = TextEditingController();
+  bool _loading = false;
+  bool _obscure = true;
   String? _error;
 
   @override
   void dispose() {
-    _phoneCtrl.dispose();
-    _emailCtrl.dispose();
+    _idCtrl.dispose();
+    _passwordCtrl.dispose();
     super.dispose();
   }
 
-  Future<void> _sendOtp() async {
-    setState(() => _error = null);
-
-    if (_mode == 'phone') {
-      final phone = _phoneCtrl.text.trim();
-      if (phone.length < 10) {
-        setState(() => _error = 'Please enter a valid phone number');
-        return;
-      }
-      setState(() => _loadingOtp = true);
-      try {
-        await ServiceLocator.authService.requestPhoneOtp(
-          PhoneOtpRequest(phoneNumber: phone, role: RoleEnum.artist),
-        );
-        if (!mounted) return;
-        Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => OtpScreen(mode: OtpMode.phone, contact: phone),
-          ),
-        );
-      } catch (e) {
-        setState(() => _error = AppFeedback.friendlyMessage(e));
-      } finally {
-        if (mounted) setState(() => _loadingOtp = false);
-      }
-    } else {
-      final email = _emailCtrl.text.trim();
-      if (!email.contains('@') || !email.contains('.')) {
-        setState(() => _error = 'Please enter a valid email address');
-        return;
-      }
-      setState(() => _loadingOtp = true);
-      try {
-        await ServiceLocator.authService.requestEmailOtp(
-          EmailOtpRequest(email: email, role: RoleEnum.artist),
-        );
-        if (!mounted) return;
-        Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => OtpScreen(mode: OtpMode.email, contact: email),
-          ),
-        );
-      } catch (e) {
-        setState(() => _error = AppFeedback.friendlyMessage(e));
-      } finally {
-        if (mounted) setState(() => _loadingOtp = false);
-      }
+  /// API: authService.login → POST /auth/login/
+  Future<void> _submit() async {
+    final id = _idCtrl.text.trim();
+    final password = _passwordCtrl.text.trim();
+    if (id.isEmpty && password.isEmpty) {
+      setState(() => _error = 'Please Enter Your Mobile Number And Password.');
+      return;
+    }
+    if (id.isEmpty) {
+      setState(() => _error = 'Please Enter Your Mobile Number.');
+      return;
+    }
+    if (id.length != 10) {
+      setState(() => _error = 'Mobile Number Must Be 10 Digits. Please Check And Try Again.');
+      return;
+    }
+    if (password.isEmpty) {
+      setState(() => _error = 'Please Enter Your Password.');
+      return;
+    }
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      await ServiceLocator.authService.login(LoginRequest(username: id, password: password));
+      if (!mounted) return;
+      await routeAfterLogin(context);
+    } catch (e) {
+      if (mounted) setState(() => _error = loginErrorMessage(e));
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
   }
 
-  // Future<void> _continueWithGoogle() async {
-  //   setState(() {
-  //     _error = null;
-  //     _loadingGoogle = true;
-  //   });
-  //   try {
-  //     final googleSignIn = GoogleSignIn(scopes: const ['email']);
-  //     final account = await googleSignIn.signIn();
-  //     if (account == null) {
-  //       setState(() => _loadingGoogle = false);
-  //       return;
-  //     }
-  //     final auth = await account.authentication;
-  //     final idToken = auth.idToken;
-  //     if (idToken == null) {
-  //       throw Exception('Google sign-in did not return an ID token');
-  //     }
-  //     await ServiceLocator.authService.googleAuth(
-  //       GoogleAuth(idToken: idToken, role: RoleEnum.artist),
-  //     );
-  //     if (!mounted) return;
-  //     await routeAfterLogin(context);
-  //   } catch (e) {
-  //     setState(() => _error = AppFeedback.friendlyMessage(e));
-  //   } finally {
-  //     if (mounted) setState(() => _loadingGoogle = false);
-  //   }
-  // }
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: SunndariBackground(
+        child: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              padding: const EdgeInsets.fromLTRB(28, 12, 28, 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SunndariLogo(width: 120),
+                  const SizedBox(height: 8),
+                  const SunndariTitle(
+                    title: 'Welcome To Your\nNext Chapter.',
+                    subtitle: 'Your Artistry. Your Ambition. Your Business.',
+                    size: 28,
+                  ),
+                  const SizedBox(height: 12),
+                  SunndariField(
+                    label: 'Mobile Number',
+                    serifLabel: false,
+                    controller: _idCtrl,
+                    hint: 'Enter Mobile Number',
+                    keyboardType: TextInputType.phone,
+                    maxLength: 10,
+                    formatters: [FilteringTextInputFormatter.digitsOnly],
+                    prefix: const _CountryPrefix(),
+                  ),
+                  SunndariField(
+                    label: 'Password',
+                    serifLabel: false,
+                    controller: _passwordCtrl,
+                    hint: 'Enter Password',
+                    obscure: _obscure,
+                    textInputAction: TextInputAction.done,
+                    onSubmitted: (_) => _loading ? null : _submit(),
+                    suffix: IconButton(
+                      icon: Icon(
+                        _obscure ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                        size: 20,
+                        color: AiraColors.roseDeep,
+                      ),
+                      onPressed: () => setState(() => _obscure = !_obscure),
+                    ),
+                  ),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(builder: (_) => ForgotPasswordScreen(initialId: _idCtrl.text.trim())),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Text('Forgot Password?',
+                            style: AiraText.sans(fontSize: 13, fontWeight: FontWeight.w600, color: AiraColors.rose)),
+                      ),
+                    ),
+                  ),
+                  if (_error != null) ...[
+                    const SizedBox(height: 4),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(Icons.info_outline_rounded, size: 16, color: AiraColors.errorText),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(_error!,
+                              style: AiraText.sans(fontSize: 13, color: AiraColors.errorText, height: 1.35)),
+                        ),
+                      ],
+                    ),
+                  ],
+                  const SizedBox(height: 10),
+
+                  // Main action
+                  SizedBox(
+                    height: 52,
+                    child: PrimaryButton(
+                      label: _loading ? 'Signing In…' : 'Sign In',
+                      expand: true,
+                      onTap: _loading ? null : _submit,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+
+                  // Alternative: OTP
+                  GhostButton(
+                    label: 'Sign In With Sunndari Code',
+                    expand: true,
+                    onTap: () => Navigator.of(context)
+                        .push(MaterialPageRoute(builder: (_) => const RegisterScreen(loginMode: true))),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'A One-Time Code On Your Registered Mobile.',
+                    textAlign: TextAlign.center,
+                    style: AiraText.sans(fontSize: 12, color: AiraColors.charcoalSoft),
+                  ),
+
+                  // New artists
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      const Expanded(child: Divider(color: AiraColors.hair)),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        child: Text('New To Sunndari?',
+                            style: AiraText.sans(
+                                fontSize: 13, fontWeight: FontWeight.w600, color: AiraColors.charcoalSoft)),
+                      ),
+                      const Expanded(child: Divider(color: AiraColors.hair)),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    height: 52,
+                    child: PrimaryButton(
+                      label: 'Start Onboarding',
+                      expand: true,
+                      arrow: true,
+                      onTap: () =>
+                          Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AboutScreen())),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Private Country Prefix widget.
+class _CountryPrefix extends StatelessWidget {
+  const _CountryPrefix();
 
   @override
   Widget build(BuildContext context) {
-    final isPhone = _mode == 'phone';
-    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
-
-    return Scaffold(
-      backgroundColor: AiraColors.bg,
-      body: SafeArea(
-        child: Column(
-          children: [
-            Expanded(
-              child: SingleChildScrollView(
-                padding: EdgeInsets.fromLTRB(28, 36, 28, bottomInset > 0 ? 16 : 24),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // ── Brand ────────────────────────────────────────
-                    const Center(child: AiraOrb(size: 64)),
-                    const SizedBox(height: 32),
-
-                    // ── Heading ──────────────────────────────────────
-                    Text(
-                      'Welcome back',
-                      style: AiraText.serif(
-                        fontSize: 30,
-                        fontWeight: FontWeight.w600,
-                        height: 1.2,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Sign in to your Sunndari account',
-                      style: AiraText.sans(
-                        fontSize: 15,
-                        color: AiraColors.charcoalSoft,
-                        height: 1.4,
-                      ),
-                    ),
-                    const SizedBox(height: 36),
-
-                    // ── Segmented control ────────────────────────────
-                    AiraSegTabs(
-                      tabs: const [
-                        SegTabItem('phone', 'Phone'),
-                        SegTabItem('email', 'Email'),
-                      ],
-                      active: _mode,
-                      onSelect: (m) => setState(() {
-                        _mode = m;
-                        _error = null;
-                      }),
-                    ),
-                    const SizedBox(height: 24),
-
-                    // ── Field label ──────────────────────────────────
-                    Text(
-                      isPhone ? 'PHONE NUMBER' : 'EMAIL ADDRESS',
-                      style: AiraText.sans(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: AiraColors.charcoalSoft,
-                        letterSpacing: 0.8,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-
-                    // ── Input ────────────────────────────────────────
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
-                      curve: Curves.easeOut,
-                      decoration: BoxDecoration(
-                        color: AiraColors.card,
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(
-                          color: _error != null
-                              ? AiraColors.errorText.withOpacity(0.55)
-                              : AiraColors.hair,
-                          width: 1.25,
-                        ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.04),
-                            blurRadius: 12,
-                            offset: const Offset(0, 3),
-                          ),
-                        ],
-                      ),
-                      child: TextField(
-                        controller: isPhone ? _phoneCtrl : _emailCtrl,
-                        keyboardType: isPhone
-                            ? TextInputType.phone
-                            : TextInputType.emailAddress,
-                        style: AiraText.sans(fontSize: 15.5, height: 1.3),
-                        cursorColor: AiraColors.roseDeep,
-                        decoration: InputDecoration(
-                          border: InputBorder.none,
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 17,
-                          ),
-                          hintText: isPhone ? '+91 00000 00000' : 'email@.com',
-                          hintStyle: AiraText.sans(
-                            fontSize: 15,
-                            color: AiraColors.charcoalSoft.withOpacity(0.55),
-                          ),
-                          prefixIcon: Padding(
-                            padding: const EdgeInsets.only(left: 14, right: 10),
-                            child: Icon(
-                              isPhone
-                                  ? Icons.phone_iphone_rounded
-                                  : Icons.mail_outline_rounded,
-                              size: 20,
-                              color: AiraColors.charcoalSoft.withOpacity(0.75),
-                            ),
-                          ),
-                          prefixIconConstraints: const BoxConstraints(
-                            minWidth: 44,
-                            minHeight: 24,
-                          ),
-                        ),
-                      ),
-                    ),
-
-                    // ── Error ────────────────────────────────────────
-                    AnimatedSize(
-                      duration: const Duration(milliseconds: 220),
-                      curve: Curves.easeOut,
-                      child: _error != null
-                          ? Padding(
-                        padding: const EdgeInsets.only(top: 12),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Icon(
-                              Icons.info_outline_rounded,
-                              size: 16,
-                              color: AiraColors.errorText,
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                _error!,
-                                style: AiraText.sans(
-                                  fontSize: 13,
-                                  color: AiraColors.errorText,
-                                  height: 1.35,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      )
-                          : const SizedBox.shrink(),
-                    ),
-                    const SizedBox(height: 28),
-
-                    // ── Primary CTA ──────────────────────────────────
-                    PrimaryButton(
-                      label: _loadingOtp ? 'Sending OTP…' : 'Send OTP',
-                      expand: true,
-                      onTap: _loadingOtp ? null : _sendOtp,
-                    ),
-                    const SizedBox(height: 28),
-
-                    // ── Divider ──────────────────────────────────────
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Divider(
-                            color: AiraColors.hair.withOpacity(0.9),
-                            thickness: 1,
-                          ),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          child: Text(
-                            'or',
-                            style: AiraText.sans(
-                              fontSize: 13,
-                              color: AiraColors.charcoalSoft,
-                            ),
-                          ),
-                        ),
-                        Expanded(
-                          child: Divider(
-                            color: AiraColors.hair.withOpacity(0.9),
-                            thickness: 1,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 28),
-
-                    // ── Google ───────────────────────────────────────
-                    // GhostButton(
-                    //   label: _loadingGoogle ? 'Connecting…' : 'Continue with Google',
-                    //   icon: Icons.g_mobiledata_rounded,
-                    //   onTap: _loadingGoogle ? null : _continueWithGoogle,
-                    // ),
-                    // const SizedBox(height: 12),
-
-                    // ── Password fallback ────────────────────────────
-                    Center(
-                      child: TextButton(
-                        onPressed: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => const PasswordLoginScreen(),
-                            ),
-                          );
-                        },
-                        style: TextButton.styleFrom(
-                          foregroundColor: AiraColors.charcoalSoft,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 10,
-                          ),
-                          minimumSize: Size.zero,
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        ),
-                        child: Text(
-                          'Log in with password instead',
-                          style: AiraText.sans(
-                            fontSize: 13.5,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-
-            // ── Bottom register bar ──────────────────────────────────
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.fromLTRB(28, 16, 28, 22),
-              decoration: BoxDecoration(
-                color: AiraColors.bg,
-                border: Border(
-                  top: BorderSide(
-                    color: AiraColors.hair.withOpacity(0.7),
-                    width: 1,
-                  ),
-                ),
-              ),
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const RegisterScreen()),
-                  );
-                },
-                child: RichText(
-                  textAlign: TextAlign.center,
-                  text: TextSpan(
-                    style: AiraText.sans(
-                      fontSize: 14.5,
-                      color: AiraColors.charcoalSoft,
-                    ),
-                    children: [
-                      const TextSpan(text: 'New to Sunndari?  '),
-                      TextSpan(
-                        text: 'Create account',
-                        style: AiraText.sans(
-                          fontSize: 14.5,
-                          fontWeight: FontWeight.w600,
-                          color: AiraColors.roseDeep,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
+    return Container(
+      padding: const EdgeInsets.only(left: 14, right: 12),
+      height: 26,
+      decoration: const BoxDecoration(border: Border(right: BorderSide(color: AiraColors.pinkBorder))),
+      alignment: Alignment.center,
+      child: Text('+91', style: AiraText.sans(fontSize: 14.5, fontWeight: FontWeight.w600)),
     );
   }
 }

@@ -1,3 +1,7 @@
+// FILE: models/auth/auth_response.dart  |  MODEL
+// Login / register response (tokens + user info).
+
+/// Model: Auth Response.
 class AuthResponse {
   final int userId;
   final String name;
@@ -17,8 +21,8 @@ class AuthResponse {
     required this.refreshToken,
   });
 
+  /// Builds this object from API JSON.
   factory AuthResponse.fromJson(Map<String, dynamic> json) {
-    // Unwrap common envelope shapes: { data: {...} }, { result: {...} }
     Map<String, dynamic> j = json;
     for (final key in ['data', 'result']) {
       final v = j[key];
@@ -28,16 +32,12 @@ class AuthResponse {
       }
     }
 
-    // Tokens may be flat (access_token/refresh_token) or nested
-    // under a `tokens` / `token` object (common DRF SimpleJWT pattern):
-    // { "tokens": { "access": "...", "refresh": "..." } }
     Map<String, dynamic> tokenSrc = j;
     final nestedTokens = j['tokens'] ?? j['token'];
     if (nestedTokens is Map<String, dynamic>) {
       tokenSrc = nestedTokens;
     }
 
-    // User info may itself be nested under `user`
     Map<String, dynamic> userSrc = j;
     final nestedUser = j['user'];
     if (nestedUser is Map<String, dynamic>) {
@@ -76,6 +76,7 @@ class AuthResponse {
     );
   }
 
+  /// Converts this object to JSON for the API.
   Map<String, dynamic> toJson() => {
     'user_id': userId,
     'name': name,

@@ -1,3 +1,7 @@
+// FILE: models/artist/portfolio.dart  |  MODEL
+// One portfolio item (photo/video + caption + approval status).
+
+/// Model: Portfolio.
 class Portfolio {
   final int portfolioId;
   final int artistId;
@@ -7,6 +11,8 @@ class Portfolio {
   final String? caption;
   final int? approvalStatusId;
   final bool isActive;
+  final bool isWorkSample;
+  final int sortOrder;
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -19,10 +25,13 @@ class Portfolio {
     this.caption,
     this.approvalStatusId,
     required this.isActive,
+    this.isWorkSample = false,
+    this.sortOrder = 0,
     required this.createdAt,
     required this.updatedAt,
   });
 
+  /// Builds this object from API JSON.
   factory Portfolio.fromJson(Map<String, dynamic> json) => Portfolio(
     portfolioId: json['portfolioId'],
     artistId: json['artistId'],
@@ -31,7 +40,9 @@ class Portfolio {
     subCategoryId: json['subCategoryId'],
     caption: json['caption'],
     approvalStatusId: json['approvalStatusId'],
-    isActive: json['isActive'],
+    isActive: json['isActive'] != false,
+    isWorkSample: json['isWorkSample'] == true,
+    sortOrder: (json['sortOrder'] as num?)?.toInt() ?? 0,
     createdAt: DateTime.parse(json['createdAt']),
     updatedAt: DateTime.parse(json['updatedAt']),
   );

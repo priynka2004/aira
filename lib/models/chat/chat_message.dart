@@ -1,9 +1,7 @@
-/// Matches the backend's chat message shape.
-///
-/// REST (`GET /chat/messages/get_all/`, `POST /chat/messages/create/`) sends
-/// `messageId`; the WebSocket's `message.created` event nests the same
-/// object under `message` with an `id` field instead — [fromJson] accepts
-/// both so callers don't need to care which transport a message came from.
+// FILE: models/chat/chat_message.dart  |  MODEL
+// One chat message.
+
+/// Model: Chat Message.
 class ChatMessage {
   final int messageId;
   final int? conversationId;
@@ -19,6 +17,7 @@ class ChatMessage {
     required this.createdAt,
   });
 
+  /// Builds this object from API JSON.
   factory ChatMessage.fromJson(Map<String, dynamic> json) {
     return ChatMessage(
       messageId: json['messageId'] ?? json['id'] ?? 0,
@@ -29,5 +28,6 @@ class ChatMessage {
     );
   }
 
+  /// Returns true if mine.
   bool isMine(int? currentUserId) => currentUserId != null && senderId == currentUserId;
 }

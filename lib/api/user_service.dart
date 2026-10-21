@@ -1,3 +1,6 @@
+// FILE: api/user_service.dart
+// User APIs: profile get/update, FCM token, customer address CRUD.
+
 import 'dart:convert';
 import 'api_endpoints.dart';
 import 'api_service.dart';
@@ -9,12 +12,14 @@ import '../models/user/customer_address.dart';
 import '../models/user/customer_address_create.dart';
 import '../models/user/customer_address_update.dart';
 
+/// User Service — API/data layer.
 class UserService {
   final ApiService _apiService;
 
   UserService(this._apiService);
 
-  // Profile
+  /// Gets profile.
+  /// API: GET /users/profile/get/
   Future<UserProfile> getProfile(int userId) async {
     final response = await _apiService.get(
       ApiEndpoints.usersProfileGet,
@@ -24,6 +29,8 @@ class UserService {
     return ApiResponse.fromJson(jsonData, UserProfile.fromJson).data;
   }
 
+  /// Updates profile.
+  /// API: PUT /users/profile/update/
   Future<void> updateProfile(UserProfileUpdate data) async {
     await _apiService.put(
       ApiEndpoints.usersProfileUpdate,
@@ -31,22 +38,13 @@ class UserService {
     );
   }
 
-  /// Sends this device's current FCM token to the backend through the
-  /// *real* profile-update endpoint — this backend has no separate
-  /// /users/fcm-token/update/ route (that 404'd; confirmed via debug
-  /// logs). GET /users/profile/get/ already returns an `fcmToken` field
-  /// on the user object, so PUT /users/profile/update/ with `fcm_token`
-  /// in the body is how it's meant to be set. An alternative/backup to
-  /// the Firestore `fcm_tokens/<userId>` doc that [PushNotificationService]
-  /// also writes — best-effort, never blocks push setup if it fails.
-  ///
-  /// [platform] isn't sent — the real endpoint only accepts `fcm_token`
-  /// alongside the usual profile fields (see [UserProfileUpdate]).
+  /// Updates FCM token.
   Future<void> updateFcmToken(String fcmToken, {String? platform}) async {
     await updateProfile(UserProfileUpdate(fcmToken: fcmToken));
   }
 
-  // Address
+  /// Creates address.
+  /// API: POST /users/address/create/
   Future<void> createAddress(CustomerAddressCreate data) async {
     await _apiService.post(
       ApiEndpoints.usersAddressCreate,
@@ -54,6 +52,8 @@ class UserService {
     );
   }
 
+  /// Gets address.
+  /// API: GET /users/address/get/
   Future<CustomerAddress> getAddress(int addressId) async {
     final response = await _apiService.get(
       ApiEndpoints.usersAddressGet,
@@ -63,6 +63,8 @@ class UserService {
     return ApiResponse.fromJson(jsonData, CustomerAddress.fromJson).data;
   }
 
+  /// Gets all addresses.
+  /// API: GET /users/address/get_all/
   Future<PaginatedResponse<CustomerAddress>> getAllAddresses({
     int limit = 10,
     int? pageNum,
@@ -81,6 +83,8 @@ class UserService {
     );
   }
 
+  /// Updates address.
+  /// API: PUT /users/address/update/
   Future<void> updateAddress(CustomerAddressUpdate data) async {
     await _apiService.put(
       ApiEndpoints.usersAddressUpdate,
@@ -88,6 +92,8 @@ class UserService {
     );
   }
 
+  /// Deletes address.
+  /// API: DELETE /users/address/delete/
   Future<void> deleteAddress(int addressId) async {
     await _apiService.delete(
       ApiEndpoints.usersAddressDelete,

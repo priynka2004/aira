@@ -1,7 +1,15 @@
+// FILE: screens/portfolio_manage_screen.dart
+// SCREEN: Portfolio — grid of photos/videos, upload, reorder, open detail.
+//
+// APIs used:
+//   GET /artists/portfolio/get_all/
+//   GET /core/service-sub-category/get_all/
+//   POST /artists/portfolio/create/
+//   DELETE /artists/portfolio/delete/
+
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../theme/tokens.dart';
@@ -14,14 +22,18 @@ import '../utils/app_feedback.dart';
 import '../utils/service_locator.dart';
 import '../utils/media_url.dart';
 import 'portfolio_detail_screen.dart';
+import '../utils/api_logger.dart';
 
+/// SCREEN: Portfolio — grid of photos/videos, upload, reorder, open detail.
 class PortfolioManageScreen extends StatefulWidget {
-  const PortfolioManageScreen({super.key});
+  final bool embedded;
+  const PortfolioManageScreen({super.key, this.embedded = false});
 
   @override
   State<PortfolioManageScreen> createState() => _PortfolioManageScreenState();
 }
 
+/// State of [PortfolioManageScreen] — holds the screen data and logic.
 class _PortfolioManageScreenState extends State<PortfolioManageScreen> {
   bool _loading = true;
   bool _uploading = false;
@@ -29,16 +41,17 @@ class _PortfolioManageScreenState extends State<PortfolioManageScreen> {
   List<Portfolio> _items = [];
   List<ServiceSubCategory> _subCategories = [];
 
-  /// portfolioId currently being downloaded/shared, so we can show a small
-  /// spinner on just that tile's share button instead of blocking the UI.
   int? _sharingId;
 
+  /// Runs once when the screen opens; starts: _load().
   @override
   void initState() {
     super.initState();
     _load();
   }
 
+  /// Loads this screen's data.
+  /// Uses 2 APIs (see inline notes).
   Future<void> _load() async {
     setState(() {
       _loading = true;
@@ -46,7 +59,9 @@ class _PortfolioManageScreenState extends State<PortfolioManageScreen> {
     });
     try {
       final results = await Future.wait([
+        // API call: artistService.getAllPortfolios → GET /artists/portfolio/get_all/
         ServiceLocator.artistService.getAllPortfolios(limit: 30),
+        // API call: coreService.getAllServiceSubCategories → GET /core/service-sub-category/get_all/
         ServiceLocator.coreService.getAllServiceSubCategories(limit: 100),
       ]);
       if (!mounted) return;
@@ -64,6 +79,8 @@ class _PortfolioManageScreenState extends State<PortfolioManageScreen> {
     }
   }
 
+  /// Adds the item.
+  /// API: artistService.createPortfolio → POST /artists/portfolio/create/
   Future<void> _add() async {
     final xfile = await ImagePicker().pickImage(
       source: ImageSource.gallery,
@@ -104,7 +121,7 @@ class _PortfolioManageScreenState extends State<PortfolioManageScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Add to portfolio',
+                      'Add To Portfolio',
                       style: AiraText.serif(
                         fontSize: 18,
                         fontWeight: FontWeight.w600,
@@ -156,7 +173,7 @@ class _PortfolioManageScreenState extends State<PortfolioManageScreen> {
                         textInputAction: TextInputAction.done,
                         decoration: const InputDecoration(
                           border: InputBorder.none,
-                          hintText: "Caption (optional)",
+                          hintText: "Caption (Optional)",
                           contentPadding: EdgeInsets.all(16),
                         ),
                       ),
@@ -185,6 +202,7 @@ class _PortfolioManageScreenState extends State<PortfolioManageScreen> {
     setState(() => _uploading = true);
 
     try {
+      // API call: artistService.createPortfolio → POST /artists/portfolio/create/
       await ServiceLocator.artistService.createPortfolio(
         CreatePortfolio(
           mediaType: MediaTypeEnum.image,
@@ -201,7 +219,7 @@ class _PortfolioManageScreenState extends State<PortfolioManageScreen> {
       if (mounted) {
         AppFeedback.showSuccess(
           context,
-          'Added to your portfolio ✓',
+          'Added To Your Portfolio ✓',
         );
       }
     } catch (e) {
@@ -217,9 +235,12 @@ class _PortfolioManageScreenState extends State<PortfolioManageScreen> {
     }
   }
 
+  /// Deletes the item.
+  /// API: artistService.deletePortfolio → DELETE /artists/portfolio/delete/
   Future<void> _delete(Portfolio p) async {
     setState(() => _items = _items.where((x) => x.portfolioId != p.portfolioId).toList());
     try {
+      // API call: artistService.deletePortfolio → DELETE /artists/portfolio/delete/
       await ServiceLocator.artistService.deletePortfolio(p.portfolioId);
     } catch (e) {
       if (mounted) {
@@ -229,30 +250,26 @@ class _PortfolioManageScreenState extends State<PortfolioManageScreen> {
     }
   }
 
-  /// Best-guess file extension from the media URL, so the shared file opens
-  /// correctly in whatever app the person picks (WhatsApp, Gallery, etc).
+  /// Extension from url.
   String _extensionFromUrl(String url) {
     final clean = url.split('?').first;
     final dot = clean.lastIndexOf('.');
     if (dot == -1) return '.jpg';
     final ext = clean.substring(dot);
-    // Guard against a stray "." with no real extension after it.
     if (ext.length < 2 || ext.length > 5) return '.jpg';
     return ext;
   }
 
-  /// Downloads the portfolio image to a temp file, then opens the native
-  /// share sheet (WhatsApp, Instagram, Messages, etc). share_plus needs a
-  /// real file on disk — it can't share a bare network URL directly.
+  /// Shares via the share sheet.
   Future<void> _share(Portfolio p) async {
     final url = resolveMediaUrl(p.fileUrl);
     if (url == null) return;
 
     setState(() => _sharingId = p.portfolioId);
     try {
-      final response = await http.get(Uri.parse(url));
+      final response = await ApiLog.get(Uri.parse(url), tag: 'HTTP/download');
       if (response.statusCode != 200) {
-        throw Exception("Couldn't load this image to share.");
+        throw Exception("Couldn't Load This Image To Share.");
       }
       final dir = await getTemporaryDirectory();
       final file = File('${dir.path}/portfolio_${p.portfolioId}${_extensionFromUrl(url)}');
@@ -261,7 +278,7 @@ class _PortfolioManageScreenState extends State<PortfolioManageScreen> {
       if (!mounted) return;
       await Share.shareXFiles(
         [XFile(file.path)],
-        text: (p.caption != null && p.caption!.isNotEmpty) ? p.caption : 'Shared via AiRA',
+        text: (p.caption != null && p.caption!.isNotEmpty) ? p.caption : 'Shared Via Sunndari',
       );
     } catch (e) {
       if (mounted) AppFeedback.showError(context, e);
@@ -270,23 +287,20 @@ class _PortfolioManageScreenState extends State<PortfolioManageScreen> {
     }
   }
 
+  /// Builds the UI.
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AiraColors.bg,
-      body: SafeArea(
-        child: Column(
+    final Widget content = Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
               child: Row(
                 children: [
-                  GestureDetector(
-                    onTap: () => Navigator.of(context).pop(),
-                    child: const Icon(Icons.arrow_back, size: 20, color: AiraColors.charcoal),
-                  ),
-                  const SizedBox(width: 12),
+                  if (!widget.embedded) ...[
+                    SunndariBackChip(onTap: () => Navigator.of(context).pop()),
+                    const SizedBox(width: 12),
+                  ],
                   Expanded(
                     child: Text('Portfolio', style: AiraText.serif(fontSize: 19, fontWeight: FontWeight.w600)),
                   ),
@@ -307,7 +321,7 @@ class _PortfolioManageScreenState extends State<PortfolioManageScreen> {
                   ? AiraErrorState(message: _error!, onRetry: _load)
                   : _items.isEmpty
                   ? Center(
-                child: Text('No portfolio items yet — tap Add to upload your work.',
+                child: Text('No Portfolio Items Yet — Tap Add To Upload Your Work.',
                     textAlign: TextAlign.center,
                     style: AiraText.sans(fontSize: 13.5, color: AiraColors.charcoalSoft)),
               )
@@ -325,6 +339,7 @@ class _PortfolioManageScreenState extends State<PortfolioManageScreen> {
                   final sharingThis = _sharingId == p.portfolioId;
                   return GestureDetector(
                     onTap: () async {
+                      // Navigates to PortfolioDetailScreen
                       final changed = await Navigator.of(context).push<bool>(
                         MaterialPageRoute(builder: (_) => PortfolioDetailScreen(portfolio: p)),
                       );
@@ -392,8 +407,11 @@ class _PortfolioManageScreenState extends State<PortfolioManageScreen> {
               ),
             ),
           ],
-        ),
-      ),
+        );
+    if (widget.embedded) return content;
+    return Scaffold(
+      backgroundColor: AiraColors.bg,
+      body: SafeArea(child: content),
     );
   }
 }

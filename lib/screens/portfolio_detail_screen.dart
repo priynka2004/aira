@@ -1,3 +1,11 @@
+// FILE: screens/portfolio_detail_screen.dart
+// SCREEN: Portfolio Detail — full photo, approval status, edit caption, delete.
+//
+// APIs used:
+//   GET /artists/portfolio/get/   (latest copy of this item when the screen opens)
+//   PUT /artists/portfolio/update/
+//   DELETE /artists/portfolio/delete/
+
 import 'package:flutter/material.dart';
 import '../theme/tokens.dart';
 import '../widgets/common.dart';
@@ -7,11 +15,7 @@ import '../utils/app_feedback.dart';
 import '../utils/service_locator.dart';
 import '../utils/media_url.dart';
 
-/// Full-detail view for a single portfolio item. Opened by tapping a tile in
-/// [PortfolioManageScreen]. Lets the artist see the full-size image, its
-/// approval status, and edit the caption — wiring up
-/// PUT /artists/portfolio/update/, which existed in the API layer but had no
-/// screen calling it anywhere in the app.
+/// SCREEN: Portfolio Detail — full photo, approval status, edit caption, delete.
 class PortfolioDetailScreen extends StatefulWidget {
   final Portfolio portfolio;
   const PortfolioDetailScreen({super.key, required this.portfolio});
@@ -20,27 +24,37 @@ class PortfolioDetailScreen extends StatefulWidget {
   State<PortfolioDetailScreen> createState() => _PortfolioDetailScreenState();
 }
 
+/// State of [PortfolioDetailScreen] — holds the screen data and logic.
 class _PortfolioDetailScreenState extends State<PortfolioDetailScreen> {
   late Portfolio _portfolio;
   bool _saving = false;
-  // True if anything changed (caption edited or item deleted) — tells the
-  // screen that opened this one whether it needs to refresh its list.
   bool _changed = false;
 
+  /// Runs once when the screen opens.
   @override
   void initState() {
     super.initState();
     _portfolio = widget.portfolio;
+    _refresh();
   }
 
+  /// Fetches the latest copy of this item (caption, approval status). If it fails the list copy stays on screen.
+  /// API: artistService.getPortfolio → GET /artists/portfolio/get/
+  Future<void> _refresh() async {
+    try {
+      final fresh = await ServiceLocator.artistService.getPortfolio(widget.portfolio.portfolioId);
+      if (mounted) setState(() => _portfolio = fresh);
+    } catch (_) {}
+  }
+
+  /// Approval label.
   String _approvalLabel(int? id) {
-    // Best-effort label — the app doesn't currently fetch
-    // /core/approval-status/get_all/ on this screen to resolve the real
-    // name, so this stays a neutral fallback rather than guessing wrong.
-    if (id == null) return 'Pending review';
+    if (id == null) return 'Pending Review';
     return 'Status #$id';
   }
 
+  /// Edits caption.
+  /// API: artistService.updatePortfolio → PUT /artists/portfolio/update/
   Future<void> _editCaption() async {
     final ctrl = TextEditingController(text: _portfolio.caption ?? '');
     final newCaption = await showModalBottomSheet<String>(
@@ -54,7 +68,7 @@ class _PortfolioDetailScreenState extends State<PortfolioDetailScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Edit caption', style: AiraText.serif(fontSize: 18, fontWeight: FontWeight.w600)),
+            Text('Edit Caption', style: AiraText.serif(fontSize: 18, fontWeight: FontWeight.w600)),
             const SizedBox(height: 16),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 14),
@@ -75,6 +89,7 @@ class _PortfolioDetailScreenState extends State<PortfolioDetailScreen> {
 
     setState(() => _saving = true);
     try {
+      // API call: artistService.updatePortfolio → PUT /artists/portfolio/update/
       await ServiceLocator.artistService.updatePortfolio(
         UpdatePortfolio(portfolioId: _portfolio.portfolioId, caption: newCaption),
       );
@@ -94,7 +109,7 @@ class _PortfolioDetailScreenState extends State<PortfolioDetailScreen> {
         );
         _changed = true;
       });
-      AppFeedback.showSuccess(context, 'Caption updated ✓');
+      AppFeedback.showSuccess(context, 'Caption Updated ✓');
     } catch (e) {
       if (mounted) AppFeedback.showError(context, e);
     } finally {
@@ -102,12 +117,14 @@ class _PortfolioDetailScreenState extends State<PortfolioDetailScreen> {
     }
   }
 
+  /// Deletes the item.
+  /// API: artistService.deletePortfolio → DELETE /artists/portfolio/delete/
   Future<void> _delete() async {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete this item?'),
-        content: const Text('This will remove it from your portfolio for good.'),
+        title: const Text('Delete This Item?'),
+        content: const Text('This Will Remove It From Your Portfolio For Good.'),
         actions: [
           TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
           TextButton(
@@ -121,6 +138,7 @@ class _PortfolioDetailScreenState extends State<PortfolioDetailScreen> {
 
     setState(() => _saving = true);
     try {
+      // API call: artistService.deletePortfolio → DELETE /artists/portfolio/delete/
       await ServiceLocator.artistService.deletePortfolio(_portfolio.portfolioId);
       _changed = true;
       if (!mounted) return;
@@ -133,6 +151,7 @@ class _PortfolioDetailScreenState extends State<PortfolioDetailScreen> {
     }
   }
 
+  /// Builds the UI.
   @override
   Widget build(BuildContext context) {
     return PopScope(
@@ -150,10 +169,7 @@ class _PortfolioDetailScreenState extends State<PortfolioDetailScreen> {
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
               child: Row(
                 children: [
-                  GestureDetector(
-                    onTap: () => Navigator.of(context).pop(_changed),
-                    child: const Icon(Icons.arrow_back, size: 20, color: Colors.white),
-                  ),
+                  SunndariBackChip(onTap: () => Navigator.of(context).pop(_changed)),
                   const Spacer(),
                   GestureDetector(
                     onTap: _saving ? null : _delete,
@@ -187,7 +203,7 @@ class _PortfolioDetailScreenState extends State<PortfolioDetailScreen> {
                     children: [
                       Expanded(
                         child: Text(
-                          _portfolio.caption?.isNotEmpty == true ? _portfolio.caption! : 'No caption',
+                          _portfolio.caption?.isNotEmpty == true ? _portfolio.caption! : 'No Caption',
                           style: AiraText.sans(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.white),
                         ),
                       ),

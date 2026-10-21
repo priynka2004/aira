@@ -1,3 +1,7 @@
+// FILE: models/core/location_type.dart  |  MODEL
+// Master data: location type (e.g. at home / at studio).
+
+/// Model: Location Type.
 class LocationType {
   final int locationTypeId;
   final String name;
@@ -15,6 +19,7 @@ class LocationType {
     required this.updatedAt,
   });
 
+  /// Builds this object from API JSON.
   factory LocationType.fromJson(Map<String, dynamic> json) => LocationType(
     locationTypeId: json['locationTypeId'],
     name: json['name'],

@@ -1,3 +1,11 @@
+// FILE: screens/chat_screen.dart
+// SCREEN: Booking Chat — live chat with the customer (REST history + WebSocket).
+//
+// APIs used:
+//   GET /chat/conversation/get/
+//   GET /chat/messages/get_all/
+//   POST /chat/messages/create/
+
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../utils/app_feedback.dart';
@@ -8,10 +16,7 @@ import '../api/chat_socket.dart';
 import '../utils/app_session.dart';
 import '../utils/service_locator.dart';
 
-/// Live chat for a single booking. Loads history over REST
-/// (`GET /chat/messages/get_all/`), then opens the WebSocket
-/// (`wss://.../ws/chat/{bookingId}/`) for real-time messages, falling back
-/// to REST sends (`POST /chat/messages/create/`) if the socket drops.
+/// SCREEN: Booking Chat — live chat with the customer (REST history + WebSocket).
 class ChatScreen extends StatefulWidget {
   final int bookingId;
   final String title;
@@ -22,6 +27,7 @@ class ChatScreen extends StatefulWidget {
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
+/// State of [ChatScreen] — holds the screen data and logic.
 class _ChatScreenState extends State<ChatScreen> {
   final _scrollController = ScrollController();
   final _inputController = TextEditingController();
@@ -38,14 +44,17 @@ class _ChatScreenState extends State<ChatScreen> {
   StreamSubscription<void>? _doneSub;
   Timer? _reconnectTimer;
 
+  /// My user id.
   int? get _myUserId => AppSession.instance.userId;
 
+  /// Runs once when the screen opens; starts: _load().
   @override
   void initState() {
     super.initState();
     _load();
   }
 
+  /// Frees controllers / listeners when the screen closes.
   @override
   void dispose() {
     _reconnectTimer?.cancel();
@@ -57,13 +66,17 @@ class _ChatScreenState extends State<ChatScreen> {
     super.dispose();
   }
 
+  /// Loads this screen's data.
+  /// Uses 2 APIs (see inline notes).
   Future<void> _load() async {
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
+      // API call: chatService.getConversation → GET /chat/conversation/get/
       final conversation = await ServiceLocator.chatService.getConversation(widget.bookingId);
+      // API call: chatService.getMessages → GET /chat/messages/get_all/
       final history = await ServiceLocator.chatService.getMessages(
         widget.bookingId,
         pageNum: 1,
@@ -89,17 +102,21 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  /// Connects socket.
+  /// API: chatService.openSocket
   void _connectSocket() {
     _eventsSub?.cancel();
     _doneSub?.cancel();
     _socket?.dispose();
 
+    // API call: chatService.openSocket
     final socket = ServiceLocator.chatService.openSocket(widget.bookingId);
     _socket = socket;
     _eventsSub = socket.events.listen(_onSocketEvent);
     _doneSub = socket.onDone.listen((_) => _scheduleReconnect());
   }
 
+  /// Schedules reconnect.
   void _scheduleReconnect() {
     if (!mounted || !_isOpen) return;
     _reconnectTimer?.cancel();
@@ -108,6 +125,7 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
+  /// Callback when socket event happens.
   void _onSocketEvent(ChatSocketEvent event) {
     if (!mounted) return;
     switch (event) {
@@ -121,19 +139,19 @@ class _ChatScreenState extends State<ChatScreen> {
       case ChatConversationClosed():
         setState(() {
           _isOpen = false;
-          _banner = 'This conversation is closed — the appointment is complete.';
+          _banner = 'This Conversation Is Closed — The Appointment Is Complete.';
         });
         _reconnectTimer?.cancel();
       case ChatMessageRejected(:final reason):
         setState(() => _banner = reason == 'conversation_closed'
-            ? 'That message couldn\'t be sent — the conversation is closed.'
-            : 'That message couldn\'t be sent. Please try again.');
+            ? 'That Message Couldn\'t Be Sent — The Conversation Is Closed.'
+            : 'That Message Couldn\'t Be Sent. Please Try Again.');
       case ChatSocketErrorEvent():
-        // Silent — the reconnect loop (via onDone) handles transient drops.
         break;
     }
   }
 
+  /// Scrolls to bottom.
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scrollController.hasClients) return;
@@ -145,6 +163,8 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
+  /// Sends the message.
+  /// API: chatService.sendMessage → POST /chat/messages/create/
   Future<void> _send() async {
     final content = _inputController.text.trim();
     if (content.isEmpty || !_isOpen || _sending) return;
@@ -154,10 +174,9 @@ class _ChatScreenState extends State<ChatScreen> {
 
     try {
       if (_socket?.isConnected ?? false) {
-        // Server echoes the send back as a message.created event, so we
-        // don't append optimistically here — it'll arrive momentarily.
         _socket!.send(content);
       } else {
+        // API call: chatService.sendMessage → POST /chat/messages/create/
         final sent = await ServiceLocator.chatService.sendMessage(widget.bookingId, content);
         if (!mounted) return;
         setState(() {
@@ -176,6 +195,7 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  /// Formats time.
   String _formatTime(String iso) {
     try {
       final d = DateTime.parse(iso).toLocal();
@@ -187,6 +207,7 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  /// UI piece: bubble.
   Widget _bubble(ChatMessage message) {
     final mine = message.isMine(_myUserId);
     return Align(
@@ -230,6 +251,7 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
+  /// Builds the UI.
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -267,7 +289,7 @@ class _ChatScreenState extends State<ChatScreen> {
                       : _messages.isEmpty
                           ? Center(
                               child: Text(
-                                'No messages yet — say hello!',
+                                'No Messages Yet — Say Hello!',
                                 style: AiraText.sans(fontSize: 13, color: AiraColors.charcoalSoft),
                               ),
                             )
@@ -293,7 +315,7 @@ class _ChatScreenState extends State<ChatScreen> {
                         ),
                         child: Center(
                           child: Text(
-                            'This conversation is closed',
+                            'This Conversation Is Closed',
                             style: AiraText.sans(fontSize: 12.5, color: AiraColors.charcoalSoft),
                           ),
                         ),
@@ -316,7 +338,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                 onSubmitted: (_) => _send(),
                                 style: AiraText.sans(fontSize: 13.5),
                                 decoration: InputDecoration(
-                                  hintText: 'Type a message…',
+                                  hintText: 'Type A Message…',
                                   hintStyle: AiraText.sans(fontSize: 13.5, color: AiraColors.charcoalSoft),
                                   border: InputBorder.none,
                                   contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),

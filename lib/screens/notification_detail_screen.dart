@@ -1,3 +1,10 @@
+// FILE: screens/notification_detail_screen.dart
+// SCREEN: Notification Detail — opened from the list or from a push-notification tap.
+//
+// APIs used:
+//   GET /notifications/get/
+//   PUT /notifications/mark_read/
+
 import 'package:flutter/material.dart';
 import '../theme/tokens.dart';
 import '../widgets/common.dart';
@@ -6,14 +13,12 @@ import '../utils/app_session.dart';
 import '../utils/service_locator.dart';
 import 'chat_screen.dart';
 import 'booking_detail_screen.dart';
+import 'business_details_screen.dart';
+import 'changes_required_screen.dart';
+import 'help_center_screen.dart';
+import '../utils/app_feedback.dart';
 
-/// Full detail view for a single notification. Reached either by tapping
-/// an item on [NotificationsScreen], or straight from a push notification
-/// tap (foreground, background, or cold start).
-///
-/// Pass [notification] when you already have it (list tap — avoids a
-/// refetch); otherwise pass [notificationId] and it's fetched via
-/// `GET /notifications/get/`.
+/// SCREEN: Notification Detail — opened from the list or from a push-notification tap.
 class NotificationDetailScreen extends StatefulWidget {
   final int notificationId;
   final AppNotification? notification;
@@ -28,17 +33,21 @@ class NotificationDetailScreen extends StatefulWidget {
   State<NotificationDetailScreen> createState() => _NotificationDetailScreenState();
 }
 
+/// State of [NotificationDetailScreen] — holds the screen data and logic.
 class _NotificationDetailScreenState extends State<NotificationDetailScreen> {
   bool _loading = true;
   String? _error;
   AppNotification? _item;
 
+  /// Runs once when the screen opens; starts: _load().
   @override
   void initState() {
     super.initState();
     _load();
   }
 
+  /// Loads this screen's data.
+  /// API: notificationService.getNotification → GET /notifications/get/
   Future<void> _load() async {
     if (widget.notification != null) {
       _item = widget.notification;
@@ -52,6 +61,7 @@ class _NotificationDetailScreenState extends State<NotificationDetailScreen> {
       _error = null;
     });
     try {
+      // API call: notificationService.getNotification → GET /notifications/get/
       final n = await ServiceLocator.notificationService.getNotification(widget.notificationId);
       if (!mounted) return;
       setState(() {
@@ -68,6 +78,8 @@ class _NotificationDetailScreenState extends State<NotificationDetailScreen> {
     }
   }
 
+  /// Marks read if needed.
+  /// Uses 2 APIs (see inline notes).
   Future<void> _markReadIfNeeded() async {
     final n = _item;
     if (n == null || n.isRead) return;
@@ -75,17 +87,19 @@ class _NotificationDetailScreenState extends State<NotificationDetailScreen> {
       if (n.firestoreDocId != null) {
         final userId = AppSession.instance.userId;
         if (userId != null) {
+          // API call: firestoreNotificationService.markAsRead
           await ServiceLocator.firestoreNotificationService.markAsRead(userId, n.firestoreDocId!);
         }
       } else {
+        // API call: notificationService.markRead → PUT /notifications/mark_read/
         await ServiceLocator.notificationService.markRead(n.notificationId);
       }
       if (mounted) setState(() => _item = n.copyWith(isRead: true));
     } catch (_) {
-      // Best-effort — not worth surfacing an error for this.
     }
   }
 
+  /// Formats date.
   String _formatDate(DateTime dt) {
     const months = [
       'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
@@ -97,14 +111,49 @@ class _NotificationDetailScreenState extends State<NotificationDetailScreen> {
     return '${dt.day} ${months[dt.month - 1]} ${dt.year}, $h:$min $suffix';
   }
 
+  /// Returns true if page feedback.
+  bool get _isPageFeedback {
+    final t = '${_item?.type ?? ''} ${_item?.title ?? ''}'.toLowerCase();
+    return t.contains('changes') || t.contains('needs attention') || t.contains('need attention') || t.contains('page_review');
+  }
+
+  /// Opens changes.
+  void _openChanges() {
+    final nav = Navigator.of(context);
+    nav.push(MaterialPageRoute(
+      builder: (ctx) => ChangesRequiredScreen(
+        changes: [
+          ReviewChange(
+            title: 'Service Details',
+            body: _item!.message.trim().isNotEmpty ? _item!.message.trim() : 'Clarify What Your Packages Include.',
+            icon: Icons.description_outlined,
+            actionLabel: 'Edit Service',
+            onAction: () => nav.push(MaterialPageRoute(builder: (_) => const BusinessDetailsScreen(initialTab: 'package'))),
+          ),
+          ReviewChange(
+            title: 'Portfolio Image',
+            body: 'Replace Any Blurred Image With A Clear Photo Of Your Work.',
+            icon: Icons.image_outlined,
+            actionLabel: 'Update Portfolio',
+            onAction: () => nav.push(MaterialPageRoute(builder: (_) => const BusinessDetailsScreen(initialTab: 'portfolio'))),
+          ),
+        ],
+        onResubmit: () {
+          Navigator.of(ctx).pop();
+          AppFeedback.showSuccess(context, 'Resubmitted For Review ✓');
+        },
+        onContactSupport: () => Navigator.of(ctx).push(MaterialPageRoute(builder: (_) => const HelpCenterScreen())),
+      ),
+    ));
+  }
+
+  /// Returns true if chat.
   bool get _isChat => (_item?.type.toLowerCase().contains('chat') ?? false) && _item?.bookingId != null;
 
-  /// Any non-chat notification that references a booking (confirmed,
-  /// cancelled, reminder, etc.) — shows a "View booking" button that
-  /// deep-links straight into [BookingDetailScreen] for that booking,
-  /// same screen you'd reach by tapping it in the Bookings tab.
+  /// Returns true if booking.
   bool get _isBooking => !_isChat && _item?.bookingId != null;
 
+  /// Builds the UI.
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -117,10 +166,7 @@ class _NotificationDetailScreenState extends State<NotificationDetailScreen> {
               padding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
               child: Row(
                 children: [
-                  GestureDetector(
-                    onTap: () => Navigator.of(context).pop(),
-                    child: const Icon(Icons.arrow_back, size: 20, color: AiraColors.charcoal),
-                  ),
+                  SunndariBackChip(onTap: () => Navigator.of(context).pop()),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text('Notification', style: AiraText.serif(fontSize: 19, fontWeight: FontWeight.w600)),
@@ -170,9 +216,10 @@ class _NotificationDetailScreenState extends State<NotificationDetailScreen> {
                                     if (_isChat) ...[
                                       const SizedBox(height: 20),
                                       PrimaryButton(
-                                        label: 'Open chat',
+                                        label: 'Open Chat',
                                         icon: Icons.chat_bubble_outline,
                                         expand: true,
+                                        // Navigates to ChatScreen
                                         onTap: () => Navigator.of(context).push(
                                           MaterialPageRoute(
                                             builder: (_) => ChatScreen(
@@ -183,12 +230,22 @@ class _NotificationDetailScreenState extends State<NotificationDetailScreen> {
                                         ),
                                       ),
                                     ],
+                                    if (_isPageFeedback) ...[
+                                      const SizedBox(height: 20),
+                                      PrimaryButton(
+                                        label: 'Review Changes',
+                                        icon: Icons.rule_rounded,
+                                        expand: true,
+                                        onTap: _openChanges,
+                                      ),
+                                    ],
                                     if (_isBooking) ...[
                                       const SizedBox(height: 20),
                                       PrimaryButton(
-                                        label: 'View booking',
+                                        label: 'View Booking',
                                         icon: Icons.calendar_today_outlined,
                                         expand: true,
+                                        // Navigates to BookingDetailScreen
                                         onTap: () => Navigator.of(context).push(
                                           MaterialPageRoute(
                                             builder: (_) => BookingDetailScreen(bookingId: _item!.bookingId!),

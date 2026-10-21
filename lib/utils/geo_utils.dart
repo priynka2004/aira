@@ -1,9 +1,9 @@
+// FILE: utils/geo_utils.dart
+// Distance (km) between two coordinates + distance text formatting.
+
 import 'dart:math' as math;
 
-/// Straight-line (great-circle) distance between two lat/lng points, in
-/// kilometres. Both points are expected to be *live* readings — the
-/// caller is responsible for refreshing them (GPS stream / socket
-/// pushes) rather than reusing a value captured once and never updated.
+/// Distance km.
 double distanceKm({
   required double lat1,
   required double lng1,
@@ -24,7 +24,7 @@ double distanceKm({
 
 double _deg2rad(double deg) => deg * (math.pi / 180.0);
 
-/// Formats a distance for display: metres under 1 km, one decimal above.
+/// Formats distance km.
 String formatDistanceKm(double km) {
   if (km < 1) return '${(km * 1000).round()} m';
   return '${km.toStringAsFixed(1)} km';

@@ -1,3 +1,6 @@
+// FILE: api/chat_service.dart
+// Booking chat APIs: get conversation, load messages (REST), send message (REST), open chat socket.
+
 import 'dart:convert';
 import '../models/chat/chat_conversation.dart';
 import '../models/chat/chat_message.dart';
@@ -7,6 +10,7 @@ import 'api_endpoints.dart';
 import 'api_service.dart';
 import 'chat_socket.dart';
 
+/// Chat Service — API/data layer.
 class ChatService {
   final ApiService _apiService;
   ChatService(this._apiService);
@@ -16,10 +20,8 @@ class ChatService {
     return json['data'] is Map<String, dynamic> ? json['data'] as Map<String, dynamic> : json;
   }
 
-  /// GET /chat/conversation/get/?booking_id= — returns the conversation,
-  /// creating it on first access. Only the booking's customer or artist
-  /// can call this; throws (via ApiService) with a 400 if the booking
-  /// isn't confirmed/in_progress yet, or the caller isn't a participant.
+  /// Gets conversation.
+  /// API: GET /chat/conversation/get/
   Future<ChatConversation> getConversation(int bookingId) async {
     final response = await _apiService.get(
       ApiEndpoints.chatConversationGet,
@@ -28,8 +30,8 @@ class ChatService {
     return ChatConversation.fromJson(_unwrap(response.body));
   }
 
-  /// GET /chat/messages/get_all/?booking_id=&page_num=&limit=&sort_order=
-  /// Stays readable after the appointment is completed.
+  /// Gets messages.
+  /// API: GET /chat/messages/get_all/
   Future<PaginatedResponse<ChatMessage>> getMessages(
     int bookingId, {
     int pageNum = 1,
@@ -50,9 +52,8 @@ class ChatService {
     return PaginatedResponse.fromJson(data, (e) => ChatMessage.fromJson(e));
   }
 
-  /// POST /chat/messages/create/ — REST fallback; prefer the WebSocket
-  /// (see [openSocket]) for live chat. Throws on empty content, a
-  /// completed appointment, or a non-participant caller.
+  /// Sends message.
+  /// API: POST /chat/messages/create/
   Future<ChatMessage> sendMessage(int bookingId, String content) async {
     final response = await _apiService.post(
       ApiEndpoints.chatMessagesCreate,
@@ -61,9 +62,7 @@ class ChatService {
     return ChatMessage.fromJson(_unwrap(response.body));
   }
 
-  /// Opens (or reopens) the live chat socket for [bookingId] using the
-  /// current session's access token. Callers own the returned [ChatSocket]
-  /// and should call `.dispose()` when the chat screen closes.
+  /// Opens socket.
   ChatSocket openSocket(int bookingId) {
     final socket = ChatSocket();
     final token = AppSession.instance.accessToken ?? '';

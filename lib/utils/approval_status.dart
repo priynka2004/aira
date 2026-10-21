@@ -1,28 +1,19 @@
+// FILE: utils/approval_status.dart
+// Maps backend approval-status id -> approved / rejected / suspended / pending.
+//
+// APIs used:
+//   GET /artists/onboarding/status/   (preferred — status: not_started | in_progress | submitted | approved | rejected | suspended)
+//   GET /core/approval-status/get_all/ (fallback: id → name)
+
 import 'package:flutter/foundation.dart';
+import '../models/artist/artist_profile.dart';
 import 'service_locator.dart';
 
-/// The set of approval "kinds" the UI knows how to render, resolved by
-/// matching the backend's status *name* rather than a hardcoded numeric id.
-///
-/// IDs for these rows come from the `core_approval_status` table on the
-/// backend (visible in Django admin as "suspended / rejected / approved /
-/// pending"). Their numeric order there is an implementation detail and can
-/// differ per environment/migration — the app must never assume e.g.
-/// "2 = approved". Only the `name` is a stable contract.
+/// Enum: Approval Status Kind values.
 enum ApprovalStatusKind { approved, rejected, suspended, pending, unknown }
 
-/// Resolves a raw `approval_status_id` into an [ApprovalStatusKind] by
-/// looking it up against GET /core/approval-status/get_all/ and matching
-/// on the status *name*, instead of comparing the id to a hardcoded number.
-///
-/// This is the single source of truth both for "should this artist be let
-/// into the app" (see [isApprovedStatusId]) and for "what should the
-/// registration-status screen display" — previously those two checks had
-/// drifted apart: navigation used this dynamic name-based lookup, while
-/// RegistrationStatusScreen still compared `approvalStatusId` to hardcoded
-/// 2/3/4, which could show the wrong screen (e.g. a suspended artist seeing
-/// "still under review") whenever those hardcoded ids didn't match the
-/// backend's real ids.
+/// Resolves approval status kind.
+/// API: coreService.getApprovalStatuses → GET /core/approval-status/get_all/
 Future<ApprovalStatusKind> resolveApprovalStatusKind(int? statusId) async {
   if (statusId == null) {
     debugPrint('[ApprovalStatus] statusId is null → pending');
@@ -55,17 +46,8 @@ Future<ApprovalStatusKind> resolveApprovalStatusKind(int? statusId) async {
   }
 }
 
-/// Resolves whether a given `approval_status_id` means "approved" by
-/// looking it up against GET /core/approval-status/get_all/ — instead of
-/// assuming a fixed numeric ID (e.g. hardcoding "2 = approved").
-///
-/// Backends commonly assign these status IDs dynamically via migrations or
-/// seed data, so a hardcoded ID can silently drift out of sync with the
-/// real value in a given environment. That mismatch was the root cause of
-/// a real bug: already-approved artists were being sent back to
-/// RegistrationStatusScreen on every app relaunch, because the splash
-/// screen compared `profile.approvalStatusId` against a hardcoded `2`
-/// instead of resolving it by name.
+/// Returns true if approved status ID.
+/// API: coreService.getApprovalStatuses → GET /core/approval-status/get_all/
 Future<bool> isApprovedStatusId(int? statusId) async {
   if (statusId == null) {
     debugPrint('[ApprovalStatus] statusId is null → not approved');
@@ -79,9 +61,6 @@ Future<bool> isApprovedStatusId(int? statusId) async {
       return false;
     }
 
-    // Match loosely ("Approved", "APPROVED", "Approval Granted", etc.)
-    // rather than requiring an exact "approved" string, since we don't
-    // control the backend's exact wording.
     final name = match.first.name.trim().toLowerCase();
     final result = name.contains('approv');
     debugPrint('[ApprovalStatus] matched name="$name" → approved=$result');
@@ -89,9 +68,22 @@ Future<bool> isApprovedStatusId(int? statusId) async {
   } catch (e) {
     debugPrint('[ApprovalStatus] could not fetch status list ($e) — letting the artist in '
         'rather than blocking them over a network hiccup');
-    // If the status list can't be fetched (e.g. a transient network
-    // hiccup), don't lock an already-logged-in, previously-approved artist
-    // out of the app over it.
     return true;
+  }
+}
+
+/// Resolves the artist's review state. The onboarding status endpoint is the source of truth
+/// (in_progress / submitted → pending); if it cannot be reached we fall back to the approval-status id.
+/// API: GET /artists/onboarding/status/
+Future<ApprovalStatusKind> resolveArtistStatusKind(ArtistProfile? profile) async {
+  try {
+    final s = await ServiceLocator.artistBusiness.getOnboardingStatus();
+    if (s.isApproved) return ApprovalStatusKind.approved;
+    if (s.isRejected) return ApprovalStatusKind.rejected;
+    if (s.isSuspended) return ApprovalStatusKind.suspended;
+    return ApprovalStatusKind.pending;
+  } catch (e) {
+    debugPrint('[ApprovalStatus] onboarding status unavailable ($e) → using approval-status id');
+    return resolveApprovalStatusKind(profile?.approvalStatusId);
   }
 }

@@ -1,3 +1,6 @@
+// FILE: widgets/journey_action_button.dart
+// WIDGET: Action button on a booking card — loads the live booking and shows the next journey step.
+
 import 'package:flutter/material.dart';
 import '../theme/tokens.dart';
 import '../models/models.dart';
@@ -9,24 +12,19 @@ import '../utils/service_locator.dart';
 import '../screens/journey_screen.dart';
 import 'common.dart';
 
-/// The dynamic "what does the artist do next" button for the real
-/// booking lifecycle (see the Booking Lifecycle Field Guide):
-///
-///   Upcoming (2h before) → On My Way → Confirm Arrival →
-///   Start Service (enter customer's PIN) → Enter Completion Code →
-///   Completed + Review
-///
-/// Fetches the live [Booking] and derives [JourneyStage] straight from
-/// it (see `booking_journey.dart`) — there's no local/cached stage
-/// anymore, so this always reflects the backend's real state. Routes
-/// into [JourneyScreen] for every stage past "Upcoming"; that screen owns
-/// the actual OTP/PIN entry, location-sharing, and completion logic.
+/// Journey Action Button widget.
 class JourneyActionButton extends StatefulWidget {
   final BookingSlot slot;
   final List<StatusItem> statuses;
   final void Function(BookingSlot slot, SlotStatus next, {String? reason}) onUpdateStatus;
   final VoidCallback? onRefresh;
   final bool small;
+
+  /// The booking the parent screen is already showing. When given, the button
+  /// uses THIS booking (so the button and the progress card above it can never
+  /// disagree) and does not fetch its own copy. When null (booking cards in
+  /// lists) the button loads the booking itself, as before.
+  final Booking? booking;
 
   const JourneyActionButton({
     super.key,
@@ -35,21 +33,25 @@ class JourneyActionButton extends StatefulWidget {
     required this.onUpdateStatus,
     this.onRefresh,
     this.small = true,
+    this.booking,
   });
 
   @override
   State<JourneyActionButton> createState() => _JourneyActionButtonState();
 }
 
+/// State of [JourneyActionButton] — holds the screen data and logic.
 class _JourneyActionButtonState extends State<JourneyActionButton> {
   late Future<Booking> _future;
 
+  /// Runs once when the screen opens.
   @override
   void initState() {
     super.initState();
     _future = ServiceLocator.bookingJourneyService.getBooking(widget.slot.bookingId!);
   }
 
+  /// Called when the parent passes new values.
   @override
   void didUpdateWidget(covariant JourneyActionButton oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -58,6 +60,7 @@ class _JourneyActionButtonState extends State<JourneyActionButton> {
     }
   }
 
+  /// API: bookingJourneyService.getBooking
   void _refetch() {
     if (mounted) {
       setState(() {
@@ -66,19 +69,19 @@ class _JourneyActionButtonState extends State<JourneyActionButton> {
     }
   }
 
+  /// Opens the next screen.
   void _open(BuildContext context) {
+    // Navigates to JourneyScreen
     Navigator.of(context)
         .push(MaterialPageRoute(
-          builder: (_) => JourneyScreen(
-            slot: widget.slot,
-            statuses: widget.statuses,
-            onUpdateStatus: widget.onUpdateStatus,
-            onRefresh: widget.onRefresh,
-          ),
-        ))
+      builder: (_) => JourneyScreen(
+        slot: widget.slot,
+        statuses: widget.statuses,
+        onUpdateStatus: widget.onUpdateStatus,
+        onRefresh: widget.onRefresh,
+      ),
+    ))
         .then((_) {
-      // Refresh after returning, in case the stage moved on inside the
-      // journey screen.
       _refetch();
     });
   }
@@ -88,51 +91,55 @@ class _JourneyActionButtonState extends State<JourneyActionButton> {
     switch (stage) {
       case JourneyStage.upcoming:
         if (slot.isWithinUpcomingWindow) {
-          return (label: 'On My Way', enabled: true);
+          return (label: 'Mark On The Way', enabled: true);
         }
         return (label: 'Upcoming', enabled: false);
       case JourneyStage.missed:
-        // Never marked on the way before the appointment's start time —
-        // the deadline is gone. Not tappable; Cancel (rendered alongside
-        // this button by the caller) is the only remaining action.
         return (label: 'Missed', enabled: false);
       case JourneyStage.onTheWay:
-        return (label: 'Confirm Arrival', enabled: true);
+        return (label: 'I Have Arrived', enabled: true);
       case JourneyStage.arrived:
         return (label: 'Start Service', enabled: true);
       case JourneyStage.inProgress:
-        return (label: 'Enter Completion Code', enabled: true);
+        return (label: 'Complete Service', enabled: true);
       case JourneyStage.completed:
         return (label: 'Completed', enabled: false);
     }
   }
 
+  /// The button for a given booking.
+  Widget _buttonFor(Booking booking) {
+    final stage = JourneyStage.fromBooking(
+      booking,
+      BookingStats.mapStatus(booking.statusId, widget.statuses, cancelledBy: booking.cancelledBy),
+    );
+    if (booking.cancelledBy != null && booking.cancelledBy!.isNotEmpty) {
+      return GhostButton(label: 'Cancelled', small: widget.small, color: AiraColors.charcoalSoft, onTap: null);
+    }
+    final info = _labelFor(stage);
+    if (!info.enabled) {
+      return GhostButton(label: info.label, small: widget.small, color: AiraColors.charcoalSoft, onTap: null);
+    }
+    return PrimaryButton(label: info.label, small: widget.small, onTap: () => _open(context));
+  }
+
+  /// Builds the UI.
   @override
   Widget build(BuildContext context) {
     if (widget.slot.bookingId == null) {
       return GhostButton(label: 'Upcoming', small: widget.small, color: AiraColors.charcoalSoft, onTap: null);
     }
+    // The parent screen already has the booking → use it (always up to date).
+    final given = widget.booking;
+    if (given != null) return _buttonFor(given);
+
     return FutureBuilder<Booking>(
       future: _future,
       builder: (context, snapshot) {
         if (!snapshot.hasData) {
           return GhostButton(label: 'Upcoming', small: widget.small, color: AiraColors.charcoalSoft, onTap: null);
         }
-        final stage = JourneyStage.fromBooking(
-          snapshot.data!,
-          BookingStats.mapStatus(snapshot.data!.statusId, widget.statuses, cancelledBy: snapshot.data!.cancelledBy),
-        );
-        // A booking the backend has actually cancelled (cancelledBy set)
-        // should never offer an action button, even if statusId itself
-        // hasn't caught up to "cancelled" yet (see mapStatus doc).
-        if (snapshot.data!.cancelledBy != null && snapshot.data!.cancelledBy!.isNotEmpty) {
-          return GhostButton(label: 'Cancelled', small: widget.small, color: AiraColors.charcoalSoft, onTap: null);
-        }
-        final info = _labelFor(stage);
-        if (!info.enabled) {
-          return GhostButton(label: info.label, small: widget.small, color: AiraColors.charcoalSoft, onTap: null);
-        }
-        return PrimaryButton(label: info.label, small: widget.small, onTap: () => _open(context));
+        return _buttonFor(snapshot.data!);
       },
     );
   }

@@ -1,3 +1,6 @@
+// FILE: api/notification_service.dart
+// In-app notification APIs: get, list, mark read, mark all read.
+
 import 'dart:convert';
 import 'api_endpoints.dart';
 import 'api_service.dart';
@@ -5,12 +8,14 @@ import '../utils/paginated_response.dart';
 import '../utils/api_response.dart';
 import '../models/notification/app_notification.dart';
 
+/// Notification Service — API/data layer.
 class NotificationService {
   final ApiService _apiService;
 
   NotificationService(this._apiService);
 
-  /// GET /notifications/get/?notification_id=
+  /// Gets notification.
+  /// API: GET /notifications/get/
   Future<AppNotification> getNotification(int notificationId) async {
     final response = await _apiService.get(
       ApiEndpoints.notificationsGet,
@@ -20,7 +25,8 @@ class NotificationService {
     return ApiResponse.fromJson(jsonData, AppNotification.fromJson).data;
   }
 
-  /// GET /notifications/get_all/
+  /// Gets all notifications.
+  /// API: GET /notifications/get_all/
   Future<PaginatedResponse<AppNotification>> getAllNotifications({
     int limit = 10,
     int? pageNum,
@@ -49,7 +55,8 @@ class NotificationService {
     );
   }
 
-  /// PUT /notifications/mark_read/  { notification_id }
+  /// Marks read.
+  /// API: PUT /notifications/mark_read/
   Future<void> markRead(int notificationId) async {
     await _apiService.put(
       ApiEndpoints.notificationsMarkRead,
@@ -57,7 +64,8 @@ class NotificationService {
     );
   }
 
-  /// PUT /notifications/mark_all_read/
+  /// Marks all read.
+  /// API: PUT /notifications/mark_all_read/
   Future<void> markAllRead() async {
     await _apiService.put(ApiEndpoints.notificationsMarkAllRead);
   }

@@ -1,3 +1,6 @@
+// FILE: screens/business_screen.dart
+// SCREEN: Business tab wrapper — sub-tabs Insights | Bookings | Finance.
+
 import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../models/booking/booking.dart';
@@ -8,8 +11,9 @@ import 'insights_screen.dart';
 import 'booking_screen.dart';
 import 'finance_screen.dart';
 
+/// SCREEN: Business tab wrapper — sub-tabs Insights | Bookings | Finance.
 class BusinessScreen extends StatelessWidget {
-  final String activeTab; // insights | booking | finance
+  final String activeTab;
   final ValueChanged<String> onTabSelect;
   final void Function(String target, [String? tab]) onNavigate;
   final List<BookingSlot> slots;
@@ -36,24 +40,19 @@ class BusinessScreen extends StatelessWidget {
     this.onRefresh,
   });
 
+  /// Builds the UI.
   @override
   Widget build(BuildContext context) {
-    return Container(
-      color: AiraColors.bg,
-      child: SafeArea(
-        child: Column(
+    final (title, sub) = switch (activeTab) {
+      'booking' => ('My Bookings', 'Every Appointment, Organised.'),
+      'finance' => ('My Earnings', 'A Clear View Of Your Business Income.'),
+      _ => ('Insights', 'See How Your Business Is Growing.'),
+    };
+    return SunndariBackground(
+      child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const AiraScreenHeader(title: 'Business'),
-            AiraSegTabs(
-              tabs: const [
-                SegTabItem('insights', 'Insights'),
-                SegTabItem('booking', 'Bookings'),
-                SegTabItem('finance', 'Finance'),
-              ],
-              active: activeTab,
-              onSelect: onTabSelect,
-            ),
+            SunndariTabHeader(title: title, subtitle: sub),
             Expanded(
               child: switch (activeTab) {
                 'booking' => BookingScreen(
@@ -62,6 +61,7 @@ class BusinessScreen extends StatelessWidget {
                   onUpdateStatus: onUpdateStatus,
                   statuses: bookingStatuses,
                   onRefresh: onRefresh,
+                  onNavigate: onNavigate,
                 ),
                 'finance' => FinanceScreen(
                   onWithdraw: onWithdraw,
@@ -74,7 +74,6 @@ class BusinessScreen extends StatelessWidget {
               },
             ),
           ],
-        ),
       ),
     );
   }
