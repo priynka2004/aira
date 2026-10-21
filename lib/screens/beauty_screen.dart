@@ -161,7 +161,7 @@ class _BeautyScreenState extends State<BeautyScreen> {
                   Padding(
                     padding: const EdgeInsets.all(10),
                     child: Text(
-                      l.caption?.isNotEmpty == true ? l.caption! : 'Untitled Look',
+                      l.caption?.isNotEmpty == true ? l.caption! : 'My Work Look',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: AiraText.sans(fontSize: 12.5, fontWeight: FontWeight.w700),

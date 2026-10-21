@@ -416,7 +416,7 @@ class PortfolioStepState extends State<PortfolioStep> implements ArtistPageStep 
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(p.caption ?? 'Untitled',
+                    Text(p.caption ?? 'My Work',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: AiraText.sans(fontSize: 11.5, fontWeight: FontWeight.w700, color: AiraColors.roseDeep)),
@@ -538,7 +538,7 @@ class PortfolioStepState extends State<PortfolioStep> implements ArtistPageStep 
                       ClipRRect(borderRadius: BorderRadius.circular(8), child: SizedBox(width: 56, height: 56, child: _thumb(p, h: 56))),
                       const SizedBox(width: 12),
                       Expanded(
-                        child: Text(p.caption ?? 'Untitled',
+                        child: Text(p.caption ?? 'My Work',
                             style: AiraText.sans(fontSize: 13.5, fontWeight: FontWeight.w700, color: AiraColors.roseDeep)),
                       ),
                       const Icon(Icons.drag_handle_rounded, color: AiraColors.charcoalSoft),

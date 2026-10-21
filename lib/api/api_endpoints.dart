@@ -5,6 +5,9 @@
 class ApiEndpoints {
   static const String baseUrl = 'https://sundari.checkour.work';
 
+  // Public (no login): artist page by slug -> ?slug=<publicSlug>
+  static const String publicArtistGet = '/public/artists/get/';
+
   static const String authRegister = '/auth/register/';
   static const String authLogin = '/auth/login/';
   static const String authEmailOtpRequest = '/auth/email-otp/request/';

@@ -23,9 +23,9 @@
       Inside WhatsApp: ⋮ menu → "Open in browser", then tap the button.</p>
   </div>
   <script>
-    var id = new URLSearchParams(location.search).get('id') || '';
+    var slug = new URLSearchParams(location.search).get('slug') || '';
     var pkg = 'com.aira.sunndari';
-    var path = 'app/profile' + (id ? '?id=' + encodeURIComponent(id) : '');
+    var path = 'app/profile' + (slug ? '?slug=' + encodeURIComponent(slug) : '');
     var isAndroid = /android/i.test(navigator.userAgent);
     var url = isAndroid
       ? 'intent://' + path + '#Intent;scheme=sunndari;package=' + pkg + ';end'

@@ -42,14 +42,15 @@ Future<void> shareArtistProfile(BuildContext context) async {
         .map((e) => (e ?? '').trim())
         .firstWhere((e) => e.isNotEmpty, orElse: () => 'A Sunndari Artist');
 
-    // Link that opens this artist's profile screen in the app (works from WhatsApp, SMS, Telegram, etc.).
-    final String link = DeepLinkService.profileShareUrl();
+    // Link that opens this artist's public profile in the app (works from WhatsApp, SMS, Telegram, etc.).
+    // Uses the artist's public slug -> ...github.io/aira/?slug=<slug>
+    final String? link = await DeepLinkService.myProfileShareUrl();
 
     final b = StringBuffer('Book $name On Sunndari');
     if (city != null && city.trim().isNotEmpty) b.write(' — makeup artist in ${city.trim()}');
     b.write('.');
     if (services.isNotEmpty) b.write('\nServices: ${services.take(6).join(', ')}');
-    b.write('\n$link');
+    if (link != null) b.write('\n$link');
     await SharePlus.instance.share(ShareParams(text: b.toString()));
   } catch (e) {
     if (context.mounted) AppFeedback.showError(context, e);
@@ -59,7 +60,7 @@ Future<void> shareArtistProfile(BuildContext context) async {
 /// Adds the artist's public profile link ("Book me here: <link>") to a caption before sharing a post / reel.
 /// Link opens the app on the Public Profile Preview screen (see DeepLinkService).
 Future<String> captionWithProfileLink(String caption) async {
-  final link = DeepLinkService.profileShareUrl();
-  if (caption.contains(link)) return caption;
+  final link = await DeepLinkService.myProfileShareUrl();
+  if (link == null || caption.contains(link)) return caption;
   return '${caption.trimRight()}\n\nBook me here: $link';
 }

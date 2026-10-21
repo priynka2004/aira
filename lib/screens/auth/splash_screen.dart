@@ -36,6 +36,7 @@ class _SplashScreenState extends State<SplashScreen> {
 
     if (!AppSession.instance.isLoggedIn) {
       _goTo(const LoginScreen());
+      DeepLinkService.instance.markReady(); // public profile link opens even before login
       return;
     }
 
@@ -66,6 +67,7 @@ class _SplashScreenState extends State<SplashScreen> {
         await AppSession.instance.clear();
         if (!mounted) return;
         _goTo(const LoginScreen());
+        DeepLinkService.instance.markReady();
         return;
       }
       setState(() {
