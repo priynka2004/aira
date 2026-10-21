@@ -1,21 +1,25 @@
 // FILE: services/deep_link_service.dart
-// Opens the Public Profile Preview screen when a shared profile link is tapped.
+// Opens PublicArtistProfileScreen ONLY when a shared profile link is tapped.
 //
-// Link format (what the app receives):  sunndari://app/profile?slug=<publicSlug>
-// The shared https link (web/open/index.html hosted on GitHub Pages / Netlify) opens this.
+// Link format (what the app receives):  sunndari://app/profile?slug=<publicSlug>&t=<tap time>
+// The shared https link (docs/index.html on GitHub Pages) opens this; it adds `t` so every tap is unique.
 //
 // Flow: link arrives (cold start or app already open) -> kept as "pending" ->
 // once Splash has opened the first screen (markReady) -> PublicArtistProfileScreen(slug) is pushed on top.
 // That screen calls GET /public/artists/get/?slug=... (no login needed).
+//
+// Why "last handled link" is saved: Android gives the app the SAME old link again when it is
+// reopened from Recent Apps / relaunched. Without this check, a normal app open would show the profile.
 
 import 'dart:async';
 
 import 'package:app_links/app_links.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../screens/public_artist_profile_screen.dart';
-import '../utils/service_locator.dart';
 import '../utils/nav_key.dart';
+import '../utils/service_locator.dart';
 
 /// Custom scheme + host registered in AndroidManifest.xml.
 const String kDeepLinkScheme = 'sunndari';
@@ -23,6 +27,8 @@ const String kDeepLinkHost = 'app';
 
 /// Hosted redirect page (docs/index.html on GitHub Pages, repo aira, folder /docs).
 const String kProfileOpenPageUrl = 'https://priynka2004.github.io/aira/';
+
+const String _kLastHandledLink = 'deep_link_last_handled';
 
 class DeepLinkService {
   DeepLinkService._();
@@ -32,6 +38,7 @@ class DeepLinkService {
   StreamSubscription<Uri>? _sub;
   Uri? _pending;
   bool _ready = false;
+  String? _lastHandled; // loaded from SharedPreferences in init()
 
   /// Builds the https link that is shared (WhatsApp, Telegram, SMS, Instagram, anywhere).
   /// Example: https://priynka2004.github.io/aira/?slug=priya-sheoran-e4c2de
@@ -66,14 +73,12 @@ class DeepLinkService {
     return slug == null ? null : profileShareUrl(slug);
   }
 
-  /// Call once in main() before runApp. Catches cold-start and warm (app already open) links.
+  /// Call once in main() before runApp.
+  /// (app_links' uriLinkStream also gives the launch link, so getInitialLink is not called separately.)
   Future<void> init() async {
     try {
-      final initial = await _appLinks.getInitialLink();
-      if (initial != null) _handle(initial);
-    } catch (e) {
-      debugPrint('DeepLink initial error = $e');
-    }
+      _lastHandled = (await SharedPreferences.getInstance()).getString(_kLastHandledLink);
+    } catch (_) {}
     _sub ??= _appLinks.uriLinkStream.listen(_handle, onError: (e) => debugPrint('DeepLink stream error = $e'));
   }
 
@@ -89,23 +94,34 @@ class DeepLinkService {
   void _handle(Uri uri) {
     debugPrint('DeepLink received = $uri');
     if (!_isProfileLink(uri)) return;
+    if ((uri.queryParameters['slug'] ?? '').trim().isEmpty) return; // no slug -> nothing to open
+    final key = uri.toString();
+    if (key == _lastHandled) {
+      debugPrint('DeepLink ignored (same old link given again by Android)');
+      return;
+    }
     _pending = uri;
     _flush();
   }
 
   void _flush() {
     if (!_ready || _pending == null) return;
-    final slug = (_pending!.queryParameters['slug'] ?? '').trim();
-    if (slug.isEmpty) {
-      _pending = null; // old ?id= links have no slug
-      return;
-    }
+    final uri = _pending!;
+    final slug = uri.queryParameters['slug']!.trim();
+
+    // Remember it so the same link is never opened twice (e.g. app reopened from Recent Apps).
+    _lastHandled = uri.toString();
+    SharedPreferences.getInstance().then((p) => p.setString(_kLastHandledLink, uri.toString())).catchError((_) => false);
+
     // Let the screen opened by Splash finish its first frame first.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final nav = navigatorKey.currentState;
       if (nav == null || _pending == null) return;
       _pending = null;
+      debugPrint('DeepLink opening public profile, slug = $slug');
       nav.push(MaterialPageRoute(builder: (_) => PublicArtistProfileScreen(slug: slug)));
     });
+    // App may be idle (link tapped while it was already open) — make sure a frame runs.
+    WidgetsBinding.instance.scheduleFrame();
   }
 }

@@ -25,7 +25,8 @@
   <script>
     var slug = new URLSearchParams(location.search).get('slug') || '';
     var pkg = 'com.aira.sunndari';
-    var path = 'app/profile' + (slug ? '?slug=' + encodeURIComponent(slug) : '');
+    // t = tap time, so the app can tell a NEW tap from Android re-sending an old link.
+    var path = 'app/profile' + (slug ? '?slug=' + encodeURIComponent(slug) + '&t=' + Date.now() : '');
     var isAndroid = /android/i.test(navigator.userAgent);
     var url = isAndroid
       ? 'intent://' + path + '#Intent;scheme=sunndari;package=' + pkg + ';end'
